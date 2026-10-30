@@ -1,0 +1,19 @@
+========================================================================================
+ AMD Ryzen 7 7800X3D Hardware Cache Cliff Benchmark (Pointer Chasing)
+ 96MB L3 SRAM vs System DDR5 Latency Boundary (4KB Pages vs 2MB HugePages)
+========================================================================================
+Buffer Size  | 4KB Latency      | HugePage Latency | Residency Zone              
+-------------+------------------+------------------+-----------------------------
+   8 MB      |        10.66 ns   |        10.69 ns   | L3 CCD Base (Standard Zen 4)
+  16 MB      |        10.95 ns   |        10.72 ns   | L3 CCD Base (Standard Zen 4)
+  24 MB      |        10.83 ns   |        10.95 ns   | L3 CCD Base (Standard Zen 4)
+  32 MB      |        11.04 ns   |        11.14 ns   | L3 CCD Base (Standard Zen 4)
+  48 MB      |        11.19 ns   |        11.17 ns   | 3D V-Cache (Stacked SRAM)
+  64 MB      |        11.35 ns   |        15.16 ns   | 3D V-Cache (Stacked SRAM)
+  80 MB      |        14.75 ns   |        14.65 ns   | 3D V-Cache (Stacked SRAM)
+  96 MB      |        29.61 ns   |        29.84 ns   | 3D V-Cache (Stacked SRAM)
+ 112 MB      |        38.32 ns   |        38.49 ns   | DDR5 Memory Bus (Spillover)
+ 128 MB      |        45.96 ns   |        44.94 ns   | DDR5 Memory Bus (Spillover)
+ 160 MB      |        52.16 ns   |        50.60 ns   | DDR5 Memory Bus (Spillover)
+ 256 MB      |        60.79 ns   |        61.87 ns   | DDR5 Memory Bus (Spillover)
+========================================================================================

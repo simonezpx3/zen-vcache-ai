@@ -1,0 +1,16 @@
+
+ Performance counter stats for './benchmarks/cache_cliff':
+
+    60,538,387,438      cycles:u                                                                (83.33%)
+     1,810,729,847      instructions:u                                                          (83.34%)
+     1,076,766,759      cache-references:u                                                      (83.32%)
+       546,422,268      cache-misses:u                                                          (83.34%)
+       574,454,863      L1-dcache-load-misses:u                                                 (83.34%)
+           342,482      dTLB-load-misses:u                                                      (83.32%)
+
+      12.871855021 seconds time elapsed
+
+      12.717961000 seconds user
+       0.064566000 seconds sys
+
+
