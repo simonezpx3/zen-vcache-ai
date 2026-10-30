@@ -12,7 +12,7 @@ echo " AMD Ryzen 7 7800X3D Hardware Cache Cliff & L3 Benchmark Suite"
 echo "===================================================================="
 
 echo "[1/3] Compiling Cache Cliff Pointer-Chasing Benchmark..."
-gcc -O3 -march=native "${BENCHMARK_DIR}/cache_cliff.c" -o "${BENCHMARK_DIR}/cache_cliff"
+gcc -O3 -march=native "${BENCHMARK_DIR}/cache_cliff.c" -o "${BENCHMARK_DIR}/cache_cliff" -lm
 
 echo "[2/3] Compiling HugePages vs Standard Paging Benchmark..."
 gcc -O3 -march=native "${BENCHMARK_DIR}/hugepages_test.c" -o "${BENCHMARK_DIR}/hugepages_test"
