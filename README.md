@@ -94,6 +94,36 @@ By advising the kernel via `madvise(addr, size, MADV_HUGEPAGE)`:
 
 ---
 
+## Practical Applications & Architecture Patterns
+
+Beyond raw synthetic benchmarks, keeping targeted working sets under the 64MB–96MB L3 boundary unlocks distinct architectural patterns in production systems:
+
+### 1. Zero-VRAM Co-existence for Multi-Model Systems
+In local AI workstations where a discrete GPU's VRAM is fully saturated by primary generative workloads (such as diffusion pipelines or large-context language models), allocating auxiliary tasks to the GPU leads to Out-Of-Memory (OOM) errors or device memory thrashing.
+- By quantizing auxiliary micro-models (such as ModernBERT, MiniLM, or domain classification heads) to INT8, total parameter footprint drops to 20–35 MB.
+- The model weights and runtime activation buffers fit entirely within the 96MB L3 SRAM pool of the Ryzen 7 7800X3D.
+- Utilizing Zen 4 AVX-512 VNNI instructions, inference executes in sub-2ms latencies directly on the CPU without issuing DRAM memory bus transactions or contending for discrete GPU VRAM.
+
+### 2. Sub-Millisecond Embedded Retrieval & Agent State
+Local agentic frameworks, CLI utilities, and background daemons frequently query metadata tables, token registries, and full-text search indices.
+- Standard file-backed SQLite queries introduce `read()` syscall overhead, kernel context switches, and redundant memory copies into user-space buffers.
+- Setting `PRAGMA mmap_size = 67108864` allows the entire database file (under 64MB) to be memory-mapped directly into the process address space.
+- B-tree lookups and FTS5 inverted index traversals execute directly from L3 SRAM cache lines at ~10–11 ns access latency, resulting in sub-millisecond query completions with zero disk I/O.
+
+### 3. Pointer-Chasing Acceleration in Graph-Based Vector Search (HNSW)
+Approximate Nearest Neighbor (ANN) search algorithms—most notably Hierarchical Navigable Small World (HNSW) graphs widely used in vector databases and RAG pipelines—are constrained by the "pointer chasing" bottleneck: traversals perform pseudo-random memory hops between graph nodes.
+- When traversing graphs in system DDR5 RAM, each node dereference incurs ~60–75 ns access latency.
+- When active vector subgraphs or quantization codebooks fit within the 96MB L3 cache, each hop resolves at ~10–12 ns SRAM latency.
+- This produces significant throughput gains (up to 88% higher query throughput and 50% faster index construction) without requiring dedicated GPU acceleration.
+
+### 4. Hierarchical Two-Tier Intent Routing
+Low-latency real-time applications (such as voice command routers, triage engines, or event dispatchers) benefit from hierarchical pipeline tiering:
+- **Tier 1 (L1 Cache Resident)**: Deterministic string and regex pattern matching (e.g., Aho-Corasick automata) executes under 0.05 ms directly within L1 instruction and data caches.
+- **Tier 2 (L3 Cache Resident)**: Semantic fallback classification using an L3-resident INT8 transformer model executes under 2 ms on the CPU.
+- Heavier generative models or remote APIs are only invoked when Tier 1 and Tier 2 escalate, slashing end-to-end latency and compute overhead.
+
+---
+
 ## Production Gotchas & Engineering Trade-offs
 
 When designing software around L3 cache residency, several operational trade-offs must be evaluated:
