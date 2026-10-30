@@ -6,7 +6,7 @@ Hardware PMU telemetry and benchmarks demonstrating low-latency memory residency
 
 ## Executive Summary
 
-AMD's 3D V-Cache is widely recognized for accelerating cache-sensitive gaming workloads. In systems programming and edge database engineering, however, the **monolithic 96MB L3 SRAM pool** on the Ryzen 7 7800X3D offers a distinctive advantage: an entire active working set—including database pages, index structures, and INT8 model weights—can reside entirely within L3 cache with ~10–11 ns access latency and ~2.5 TB/s aggregate bandwidth, completely bypassing the ~70 ns DDR5 bus.
+AMD's 3D V-Cache is widely recognized for accelerating cache-sensitive gaming workloads. In systems programming and edge database engineering, however, the **monolithic 96MB L3 SRAM pool** on the Ryzen 7 7800X3D offers a distinctive advantage: an entire active working set—including database pages, index structures, and INT8 model weights—can reside entirely within L3 cache with ~10–11 ns access latency and ~1.3 TB/s aggregate bandwidth on a single 8C CCD, minimizing steady-state DRAM memory traffic and bypassing the ~70 ns DDR5 bus latency stalls.
 
 This repository provides reproducible benchmarks and raw Linux PMU hardware performance counter logs (`perf stat`) characterizing the memory boundary, SQLite zero-copy performance, and TLB mitigation.
 
@@ -100,9 +100,9 @@ Beyond raw synthetic benchmarks, keeping targeted working sets under the 64MB–
 
 ### 1. Zero-VRAM Co-existence for Multi-Model Systems
 In local AI workstations where a discrete GPU's VRAM is fully saturated by primary generative workloads (such as diffusion pipelines or large-context language models), allocating auxiliary tasks to the GPU leads to Out-Of-Memory (OOM) errors or device memory thrashing.
-- By quantizing auxiliary micro-models (such as ModernBERT, MiniLM, or domain classification heads) to INT8, total parameter footprint drops to 20–35 MB.
-- The model weights and runtime activation buffers fit entirely within the 96MB L3 SRAM pool of the Ryzen 7 7800X3D.
-- Utilizing Zen 4 AVX-512 VNNI instructions, inference executes in sub-2ms latencies directly on the CPU without issuing DRAM memory bus transactions or contending for discrete GPU VRAM.
+- By quantizing auxiliary micro-models (such as MiniLM-L6-v2, MobileBERT, or domain classification heads) to INT8, total parameter footprint drops to 20–35 MB (note: larger base models like ModernBERT-base with ~149M parameters require ~150 MB in INT8 and exceed single-CCD L3 capacity).
+- The lightweight model weights and small-batch activation buffers fit entirely within the 96MB L3 SRAM pool of the Ryzen 7 7800X3D.
+- Utilizing Zen 4 AVX-512 VNNI instructions, inference executes in sub-2ms latencies directly on the CPU while minimizing steady-state DRAM memory bus stalls and avoiding contention for discrete GPU VRAM.
 
 ### 2. Sub-Millisecond Embedded Retrieval & Agent State
 Local agentic frameworks, CLI utilities, and background daemons frequently query metadata tables, token registries, and full-text search indices.
@@ -118,7 +118,7 @@ Approximate Nearest Neighbor (ANN) search algorithms—most notably Hierarchical
 
 ### 4. Hierarchical Two-Tier Intent Routing
 Low-latency real-time applications (such as voice command routers, triage engines, or event dispatchers) benefit from hierarchical pipeline tiering:
-- **Tier 1 (L1 Cache Resident)**: Deterministic string and regex pattern matching (e.g., Aho-Corasick automata) executes under 0.05 ms directly within L1 instruction and data caches.
+- **Tier 1 (L1 Cache Resident)**: Compact deterministic string matching (e.g., Aho-Corasick state machines sized under the 32 KiB L1D capacity) executes under 0.05 ms directly within L1 cache.
 - **Tier 2 (L3 Cache Resident)**: Semantic fallback classification using an L3-resident INT8 transformer model executes under 2 ms on the CPU.
 - Heavier generative models or remote APIs are only invoked when Tier 1 and Tier 2 escalate, slashing end-to-end latency and compute overhead.
 
@@ -131,7 +131,7 @@ The empirical latency curves and architectural observations captured in this rep
 ### 1. Pointer-Chasing Latency Curves (*Chips and Cheese*, *Overclock.net*)
 - Microarchitectural analysis by *Chips and Cheese* confirms that AMD's stacked 3D V-Cache die introduces only a marginal **~4-cycle latency delta** compared to standard Zen 4 base L3 cache slices.
 - On standard Zen 4 desktop processors (such as the Ryzen 7 7700X), pointer-chasing benchmarks exhibit a steep latency cliff immediately after surpassing the **32MB L3 threshold**, spilling directly into DDR5 memory.
-- On the Ryzen 7 7800X3D, this latency plateau remains flat across the expanded **32MB–96MB region** (~10.6–11.4 ns in our empirical PMU runs) before transitioning to off-die AM5 DDR5-6000 system memory latency boundaries (**~60–75 ns**, matching our measured 60.79 ns ceiling at 256MB).
+- On the Ryzen 7 7800X3D, this latency plateau remains flat across the expanded **8MB–64MB region** (~10.6–11.4 ns in our empirical PMU runs)—doubling standard L3 capacity—with 80MB–96MB acting as a transition boundary before spilling over to off-die AM5 DDR5-6000 system memory latency (**~60–75 ns**, matching our measured 60.79 ns ceiling at 256MB).
 
 ### 2. Algorithmic Memory Bottlenecks in Vector Search (*Qdrant*, *Milvus*, *arXiv*)
 - In Approximate Nearest Neighbor (ANN) vector search, graph traversal algorithms (most notably HNSW) do not benefit from sequential streaming bandwidth; they are inherently constrained by **random memory pointer dereferencing** across non-contiguous graph nodes.
