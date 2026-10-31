@@ -1,5 +1,11 @@
 # Cache-Resident Working Sets: Exploiting Zen 4 96MB V-Cache for Sub-Millisecond SQLite & Edge Micro-AI
 
+![Hardware: AMD Ryzen 7 7800X3D](https://img.shields.io/badge/Hardware-Ryzen_7_7800X3D-ED1C24?logo=amd&logoColor=white)
+![Architecture: Zen 4 (8C/16T)](https://img.shields.io/badge/Architecture-Zen_4_(8C%2F16T)-orange)
+![L3 Cache: 96MB Unified](https://img.shields.io/badge/L3_Cache-96MB_Unified_SRAM-blue)
+![OS: Linux 6.14](https://img.shields.io/badge/OS-Linux_6.14-yellow?logo=linux&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
 Hardware PMU telemetry and benchmarks demonstrating low-latency memory residency on the AMD Ryzen 7 7800X3D (Zen 4, 8C/16T, 96MB unified L3 SRAM).
 
 ---
@@ -9,6 +15,18 @@ Hardware PMU telemetry and benchmarks demonstrating low-latency memory residency
 AMD's 3D V-Cache is widely recognized for accelerating cache-sensitive gaming workloads. In systems programming and edge database engineering, however, the **monolithic 96MB L3 SRAM pool** on the Ryzen 7 7800X3D offers a distinctive advantage: an entire active working set—including database pages, index structures, and INT8 model weights—can reside entirely within L3 cache with ~10–11 ns access latency and ~1.3 TB/s aggregate bandwidth on a single 8C CCD, minimizing steady-state DRAM memory traffic and bypassing the ~70 ns DDR5 bus latency stalls.
 
 This repository provides reproducible benchmarks and raw Linux PMU hardware performance counter logs (`perf stat`) characterizing the memory boundary, SQLite zero-copy performance, and TLB mitigation.
+
+### Test Rig & Environment Specifications
+
+| Component | Specification | Operational Role |
+|:---|:---|:---|
+| **CPU** | AMD Ryzen 7 7800X3D (Zen 4, 8 Cores / 16 Threads) | Single monolithic CCD, 4.2 GHz base / 5.0 GHz boost |
+| **L1 Cache** | 32 KiB L1D + 32 KiB L1I per core (512 KiB total) | ~0.8–1.0 ns access latency |
+| **L2 Cache** | 1024 KiB (1 MiB) per core (8 MiB total) | ~3.0–3.2 ns access latency |
+| **L3 Cache** | **96 MiB Unified SRAM** (32 MiB base + 64 MiB 3D V-Cache) | ~10.6–11.4 ns sustained latency (~1.3 TB/s bandwidth) |
+| **System Memory** | 32 GiB Dual-Channel DDR5-6000 CL30 (EXPO enabled) | ~60–75 ns random access floor |
+| **Host Operating System** | Arch Linux (Kernel 6.14.x, x86-64-v3) | Linux PMU subsystem (`perf`, `cgroups v2`) |
+| **Compiler / Toolchain** | GCC 14.x (`-O3 -march=native`), Python 3.12+ | AVX-512 VNNI SIMD vectorization enabled |
 
 ---
 
@@ -32,6 +50,21 @@ Unlike dual-CCD models (e.g., Ryzen 9 7900X3D and 7950X3D), where only one CCD c
 ```
 
 All 8 physical cores and 16 execution threads share direct, uniform access to the 96MB L3 slice without inter-core die-crossing latency.
+
+### Single-CCD vs. Dual-CCD Topology Comparison
+
+| Metric / Attribute | Single-CCD X3D (e.g. 7800X3D, 9800X3D) | Dual-CCD Asymmetric X3D (e.g. 7900X3D, 7950X3D) |
+|:---|:---|:---|
+| **CCD Layout** | 1 monolithic 8C/16T die | 2 distinct CCDs (1× V-Cache CCD + 1× Frequency CCD) |
+| **L3 Cache Distribution** | Single unified 96 MiB pool | Split: 96 MiB on CCD0, standard 32 MiB on CCD1 |
+| **Inter-Core Die Crossing** | **0 ns** (all intra-CCD communication) | **~70–80 ns** penalty across Infinity Fabric & IOD |
+| **OS Thread Scheduling** | Fully symmetric, zero thread-parking required | Requires complex CPPC / thread-parking drivers |
+| **Cache-Resident Safety** | **Guaranteed flat ~11 ns across all cores** | Unpredictable if OS scheduler migrates threads to CCD1 |
+
+**Applicable 1-CCD V-Cache Processors**: This architecture pattern and benchmark suite directly apply to all AMD processors featuring 1 monolithic V-Cache CCD:
+- **Zen 5**: Ryzen 7 9800X3D (8C/16T, 96MB unified L3, inverted under-die stacking)
+- **Zen 4**: Ryzen 7 7800X3D (8C/16T, 96MB unified L3), Ryzen 5 7600X3D (6C/12T, 96MB unified L3)
+- **Zen 3**: Ryzen 7 5800X3D, 5700X3D, 5600X3D (AM4, DDR4, 96MB unified L3)
 
 ---
 
@@ -57,6 +90,22 @@ Measured on Linux 6.14 (Zen 4, AMD Ryzen 7 7800X3D @ 4.2–5.0 GHz):
 | **128 MB** | **45.96 ns** | DDR5 Memory Bus | Full DDR5 latency penalty |
 | **160 MB** | **52.16 ns** | DDR5 Memory Bus | DRAM bandwidth bound |
 | **256 MB** | **60.79 ns** | DDR5 Memory Bus | Saturated DDR5 bus access |
+
+### Visualizing the Cliff: L3 Residency vs. DDR5 Memory Wall
+
+```
+  Latency (ns)
+   70 +                                                     * [256MB: 60.8ns]
+   60 +                                             *       |
+   50 +                                     *       |       | [160MB: 52.2ns]
+   40 +                             *       |       |       | [128MB: 46.0ns]
+   30 +                     *       |       |       |       | [112MB: 38.3ns]
+   20 +             *       |       |       |       |       | [ 96MB: 29.6ns - L3 Ceiling]
+   10 + * * * * * * |       |       |       |       |       | [ 8MB–64MB: ~11ns Flat SRAM]
+    0 +-------------+-------+-------+-------+-------+-------+--> Working Set Size
+       8  16 32 48 64  80  96  112 128 160 256 MB
+      [-- 3D V-Cache Zone --] [Spill] [---- DDR5 Memory Bus ----]
+```
 
 ### Key Observation
 Between **8 MB and 64 MB**, access latency remains completely flat at **10.6–11.3 ns**. On a standard non-V-Cache processor (such as the Ryzen 7 7700X with 32MB L3), buffers of 48MB and 64MB immediately degrade to >40 ns DRAM access. The 3D V-Cache maintains sub-12 ns memory access for working sets twice the size of conventional L3 caches.
@@ -104,11 +153,34 @@ In local AI workstations where a discrete GPU's VRAM is fully saturated by prima
 - The lightweight model weights and small-batch activation buffers fit entirely within the 96MB L3 SRAM pool of the Ryzen 7 7800X3D.
 - Utilizing Zen 4 AVX-512 VNNI instructions, inference executes in sub-2ms latencies directly on the CPU while minimizing steady-state DRAM memory bus stalls and avoiding contention for discrete GPU VRAM.
 
+```bash
+# Recommended environment configuration for CPU-resident INT8 inference
+export OMP_NUM_THREADS=8
+export GOMP_CPU_AFFINITY="0-7"
+export ONNXRUNTIME_EXECUTION_PROVIDERS="CPUExecutionProvider"
+# Run quantized model pinned to single CCD without cross-die migration
+taskset -c 0-7 python3 run_embedding_head.py --model minilm-l6-v2-int8.onnx
+```
+
 ### 2. Sub-Millisecond Embedded Retrieval & Agent State
 Local agentic frameworks, CLI utilities, and background daemons frequently query metadata tables, token registries, and full-text search indices.
 - Standard file-backed SQLite queries introduce `read()` syscall overhead, kernel context switches, and redundant memory copies into user-space buffers.
 - Setting `PRAGMA mmap_size = 67108864` allows the entire database file (under 64MB) to be memory-mapped directly into the process address space.
 - B-tree lookups and FTS5 inverted index traversals execute directly from L3 SRAM cache lines at ~10–11 ns access latency, resulting in sub-millisecond query completions with zero disk I/O.
+
+```python
+import sqlite3
+
+def connect_l3_resident_db(db_path: str) -> sqlite3.Connection:
+    """Configures SQLite connection for zero-copy L3 cache residency."""
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA mmap_size = 67108864;")   # 64 MB zero-copy mmap
+    conn.execute("PRAGMA cache_size = -32768;")     # 32 MB page cache allocation
+    conn.execute("PRAGMA temp_store = MEMORY;")     # Ephemeral structures in memory
+    return conn
+```
 
 ### 3. Pointer-Chasing Acceleration in Graph-Based Vector Search (HNSW)
 Approximate Nearest Neighbor (ANN) search algorithms—most notably Hierarchical Navigable Small World (HNSW) graphs widely used in vector databases and RAG pipelines—are constrained by the "pointer chasing" bottleneck: traversals perform pseudo-random memory hops between graph nodes.
@@ -121,6 +193,21 @@ Low-latency real-time applications (such as voice command routers, triage engine
 - **Tier 1 (L1 Cache Resident)**: Compact deterministic string matching (e.g., Aho-Corasick state machines sized under the 32 KiB L1D capacity) executes under 0.05 ms directly within L1 cache.
 - **Tier 2 (L3 Cache Resident)**: Semantic fallback classification using an L3-resident INT8 transformer model executes under 2 ms on the CPU.
 - Heavier generative models or remote APIs are only invoked when Tier 1 and Tier 2 escalate, slashing end-to-end latency and compute overhead.
+
+---
+
+## Production Cheat Sheet: 3 Golden Rules for Systems Engineers
+
+To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D processors in production, enforce these three principles:
+
+1. **The Rule of 64MB (Working Set Sizing)**:
+   Never size active datasets to the nominal 96MB hardware ceiling. Keep hot working sets, model weights, and SQLite mmap buffers **strictly under 64 MB**. This leaves 32MB headroom for operating system buffers, thread stacks, dynamic heap allocations, and kernel interrupts without triggering pseudo-LRU cache line evictions.
+
+2. **Enforce 2MB HugePages for Buffers >16MB**:
+   Standard 4KB paging across 64MB buffers exhausts the Zen 4 L2 dTLB (2,048–3,072 entries) and incurs heavy page table walk overhead. Always advise allocations via `madvise(MADV_HUGEPAGE)` or mount datasets onto `hugetlbfs` to reduce page table entries from 16,384 down to 32 (-98% TLB misses).
+
+3. **Pin Threads to the Single CCD**:
+   Bind performance-critical worker threads to the physical cores of the V-Cache CCD using `sched_setaffinity()` or `taskset -c 0-7`. Preventing the Linux scheduler from migrating threads preserves core-private L1/L2 caches and eliminates cross-core invalidation storms.
 
 ---
 
