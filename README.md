@@ -43,7 +43,7 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 - [Benchmark 8: Hierarchical Two-Tier L3 HNSW Vector Graph](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)
 - [Benchmark 9: Streaming In-L3 Zstandard Dictionary & LZ4 Decompression Pipeline](#benchmark-9-streaming-in-l3-zstandard-dictionary--lz4-decompression-pipeline)
 - [Practical Applications & Architecture Patterns](#practical-applications--architecture-patterns)
-- [Production Cheat Sheet: 4 Golden Rules for Systems Engineers](#production-cheat-sheet-4-golden-rules-for-systems-engineers)
+- [Production Cheat Sheet: 7 Golden Rules for Systems Engineers](#production-cheat-sheet-7-golden-rules-for-systems-engineers)
 - [Repository Structure & Tooling](#repository-structure--tooling)
 - [External Validation & Microarchitectural Corroboration](#external-validation--microarchitectural-corroboration)
 - [Production Gotchas & Engineering Trade-offs](#production-gotchas--engineering-trade-offs)
@@ -384,11 +384,41 @@ Low-latency real-time applications (such as voice command routers, triage engine
 - **Tier 2 (L3 Cache Resident)**: Semantic fallback classification using an L3-resident INT8 transformer model executes under 2 ms on the CPU.
 - Heavier generative models or remote APIs are only invoked when Tier 1 and Tier 2 escalate, slashing end-to-end latency and compute overhead.
 
+### 5. Hybrid GPU + L3-Resident Speculative Decoding in `llama.cpp`
+When running 9B–27B LLMs on an 8 GB GPU (`Qwen3.5-9B-Instruct-Q4_K_M` or ternary `Bonsai-2-27B`), avoid loading a secondary 0.5B dense draft model—it spills out of L3 (463 MiB) and saturates dual-channel DDR5 at 4 cores. Instead, configure `llama-cli` / `llama-server` to run an **L3-resident n-gram state machine** (`< 12 MiB` L3 SRAM, `0 MiB` extra VRAM) pinned strictly to `Cores 4–7`:
+
+```bash
+# Production hybrid GPU + L3 speculative decoding launcher (87.9 t/s greenfield, 701.9 t/s refactoring)
+llama-server \
+  -m Qwen3.5-9B-Instruct-Q4_K_M.gguf \
+  -c 8192 -ngl 99 -fa on \
+  --spec-type ngram-map-k4v,ngram-mod \
+  --draft-max 16 --draft-min 2 \
+  --spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1 \
+  --port 8081
+```
+
+### 6. Zero-Syscall Multi-Agent Telemetry & Routing Bus (`examples/l3_ipc.c` & `examples/l3_ipc_bus.py`)
+Instead of spawning subprocesses (`78.97 µs`) or crossing the Linux kernel VFS via `AF_UNIX` sockets (`2,464.95 ns`), map a `1.0 MiB` lockless sequence ring buffer in `/dev/shm` (`2048` slots $\times$ `512 B`, `alignas(128)`). Producer daemons (routers, knowledge bases) publish JSON telemetry in **~25–35 ns** with zero syscalls, and SSE dashboard consumers poll the atomic `write_seq` counter directly in L3 cache while remaining 100% immune to `SIGKILL` reader crashes:
+
+```bash
+gcc -O3 -march=znver4 -shared -fPIC examples/l3_ipc.c -o examples/libl3_ipc.so -lrt
+python3 examples/l3_ipc_bus.py
+```
+
+### 7. Production Two-Tier L3 HNSW + AVX-512 Vector RAG (`examples/l3_vector_kernel.c`)
+For local agent knowledge bases (`1,000–100,000` documents), separate the index into two hardware-aligned tiers:
+- **Tier 1 (L3 SRAM Resident)**: `64 B` 1-bit binary signatures + Layer-1 medoid entry points + Layer-0 HNSW small-world adjacency lists (`M = 16` neighbors = `64 B/node`). Traverses the graph in L3 cache using `_mm512_popcnt_epi64` and `_mm_prefetch(..., _MM_HINT_T0)` (`158.5 KiB` total L3 footprint for 1,267 docs).
+- **Tier 2 (DRAM Rescore)**: Rescores only the Top-K shortlist using AVX-512BW signed `INT8` dot products (`_mm512_madd_epi16`).
+
+### 8. Ephemeral `/dev/shm` Sandbox & Transcript Compression (`examples/l3_zstd_stream.py`)
+When capturing high-volume CLI sandbox outputs in `/dev/shm` or indexing millions of short JSONL agent events (~400 bytes/line), standard per-line compression fails (`1.22×`). By training a **112 KiB Zstandard dictionary** (`zstd --train ... --maxdict=114688`) and binding `ZSTD_compress_usingDict` / `ZSTD_decompress_usingDict` via `ctypes` (`libzstd.so.1`), the dictionary stays hot in L2/L3 cache—yielding **`8.67×` per-line compression** (`7.12×` smaller than standard Zstd) and **`2.31–6.13 GB/s`** single-core decompression speed.
+
 ---
 
-## Production Cheat Sheet: 4 Golden Rules for Systems Engineers
+## Production Cheat Sheet: 7 Golden Rules for Systems Engineers
 
-To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D processors in production, enforce these four principles:
+To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D processors in production, enforce these seven principles:
 
 1. **The Rule of 64MB (Working Set Sizing)**:
    Never size active datasets to the nominal 96MB hardware ceiling. Keep hot working sets, model weights, and SQLite mmap buffers **strictly under 64 MB**. This leaves 32MB headroom for operating system buffers, thread stacks, dynamic heap allocations, and kernel interrupts without triggering pseudo-LRU cache line evictions.
@@ -401,6 +431,15 @@ To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D proc
 
 4. **Partition Cores for I/O and Compute Isolation**:
    When combining background compute or model generation with low-latency search, partition the 8 physical cores: bind database and vector search workers to Cores 0–3 and heavy background threads to Cores 4–7. This preserves sub-millisecond p99 latency (759 µs vs. 790 µs unpinned) and reduces latency jitter by **12.2%** even under heavy DDR5 memory bus flooding.
+
+5. **The 4-Core DDR5 Saturation Law (For Weights Spilling Out of L3)**:
+   Whenever a CPU model or buffer exceeds the 96 MB 3D V-Cache (e.g., a 463 MiB 0.5B GGUF model), **restrict execution strictly to 4 physical cores (`-t 4`)**. Dual-channel DDR5-6000 bandwidth (~75 GB/s) saturates completely at 4 Zen 4 cores (`154.53 t/s`); scaling to 8 cores causes memory-controller bank thrashing, **reducing throughput by -15.1%** (`131.17 t/s`) and increasing latency jitter by **13.4×**.
+
+6. **Two-Tier Graph Separation (Hot L3 Sketch vs. Cold DRAM Payload)**:
+   Never interleave full `FP32` vectors (`2,048 B`) inside HNSW graph nodes. Keep the Layer-0 adjacency list (`64 B`) and compact `1-bit` / `INT8` quantized sketches inside a dedicated L3-resident array (`<= 320 B/node`), and touch DRAM `FP32` / `INT8` payloads only during final Top-K rescoring (**+69.9% QPS** at **1.0000 Recall@10**).
+
+7. **Pin 112 KiB Zstd Dictionaries in L2/L3 for Sub-Kilobyte Streams**:
+   For JSONL telemetry, agent transcripts, and `/dev/shm` IPC payloads under 1 KB, pre-train a **112 KiB Zstandard dictionary (`ZSTD_CDict` / `ZSTD_DDict`)**. Because 112 KiB fits entirely inside the 1 MiB per-core L2 and 96 MB L3 cache, dictionary lookups incur zero DRAM traffic while boosting compression ratio by **7.12×** and decompression throughput to **2.31–6.13 GB/s**.
 
 ---
 
@@ -450,6 +489,11 @@ When designing software around L3 cache residency, several operational trade-off
 │   ├── l3_zstd_dict_stream.c      # In-L3 112 KiB Zstd dictionary & 21 GB/s LZ4 stream test
 │   ├── simd_l3_rag.c              # AVX-512 VPOPCNTDQ (Hamming) & VNNI (INT8) standalone test
 │   └── sqlite_l3_mmap.py          # SQLite FTS5 mmap vs page cache comparison
+├── examples/
+│   ├── l3_ipc.c                   # Production /dev/shm lockless ring-buffer C shared library
+│   ├── l3_ipc_bus.py              # Python ctypes wrapper for nanosecond L3 IPC telemetry
+│   ├── l3_vector_kernel.c         # Production Two-Tier L3 HNSW & AVX-512 C shared library
+│   └── l3_zstd_stream.py          # Python ctypes libzstd.so.1 L3 dictionary stream wrapper
 ├── results/
 │   ├── baseline_probe_results.json # Hardware PMU flags and baseline query probe
 │   ├── cache_cliff_run.txt        # Raw latency numbers from 8MB to 256MB
