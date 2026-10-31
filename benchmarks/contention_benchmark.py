@@ -116,9 +116,13 @@ def main():
         print("\nStopping background stress workers...")
         stop_event.set()
         for p in workers:
-            p.join(timeout=2.0)
+            p.join(timeout=1.0)
             if p.is_alive():
                 p.terminate()
+                p.join(timeout=1.0)
+            if p.is_alive():
+                p.kill()
+                p.join()
 
     # Calculate statistics
     def calc_stats(lats):
