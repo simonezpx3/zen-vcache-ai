@@ -128,14 +128,14 @@ Low-latency real-time applications (such as voice command routers, triage engine
 
 The empirical latency curves and architectural observations captured in this repository align directly with independent microarchitectural analyses and published industry research:
 
-### 1. Pointer-Chasing Latency Curves ([*Chips and Cheese*](https://chipsandcheese.com/2023/03/05/amds-ryzen-9-7950x3d-zen-4-gets-v-cache/))
-- Microarchitectural analysis by [*Chips and Cheese*](https://chipsandcheese.com/2023/03/05/amds-ryzen-9-7950x3d-zen-4-gets-v-cache/) confirms that AMD's stacked 3D V-Cache die introduces only a marginal **~4-cycle latency delta** compared to standard Zen 4 base L3 cache slices.
+### 1. Pointer-Chasing Latency Curves ([*Chips and Cheese*](https://chipsandcheese.com/2023/04/23/amds-7950x3d-zen-4-gets-vcache/))
+- Microarchitectural analysis by [*Chips and Cheese*](https://chipsandcheese.com/2023/04/23/amds-7950x3d-zen-4-gets-vcache/) confirms that AMD's stacked 3D V-Cache die introduces only a marginal **~4-cycle latency delta** compared to standard Zen 4 base L3 cache slices.
 - On standard Zen 4 desktop processors (such as the Ryzen 7 7700X), pointer-chasing benchmarks exhibit a steep latency cliff immediately after surpassing the **32MB L3 threshold**, spilling directly into DDR5 memory.
 - On the Ryzen 7 7800X3D, this latency plateau remains flat across the expanded **8MB–64MB region** (~10.6–11.4 ns in our empirical PMU runs)—doubling standard L3 capacity—with 80MB–96MB acting as a transition boundary before spilling over to off-die AM5 DDR5-6000 system memory latency (**~60–75 ns**, matching our measured 60.79 ns ceiling at 256MB).
 
-### 2. Algorithmic Memory Bottlenecks in Vector Search ([*Coleman et al. / arXiv*](https://arxiv.org/abs/2104.03221), [*Qdrant*](https://qdrant.tech/articles/memory-types-in-vector-search/))
+### 2. Algorithmic Memory Bottlenecks in Vector Search ([*Coleman et al. / arXiv*](https://arxiv.org/abs/2104.03221), [*Qdrant*](https://qdrant.tech/articles/immutable-data-structures/))
 - In Approximate Nearest Neighbor (ANN) vector search, graph traversal algorithms (most notably HNSW) do not benefit from sequential streaming bandwidth; they are inherently constrained by **random memory pointer dereferencing** across non-contiguous graph nodes.
-- Technical publications from vector database engineering teams ([*Qdrant*](https://qdrant.tech/articles/memory-types-in-vector-search/)) and distributed systems research confirm that retaining graph hierarchies and centroid quantization tables within massive L3 cache pools (across consumer X3D chips and server-grade AMD EPYC Genoa-X parts) eliminates DDR memory stalls, yielding documented throughput gains exceeding 80–90%.
+- Technical publications from vector database engineering teams ([*Qdrant*](https://qdrant.tech/articles/immutable-data-structures/)) and distributed systems research confirm that retaining graph hierarchies and centroid quantization tables within massive L3 cache pools (across consumer X3D chips and server-grade AMD EPYC Genoa-X parts) eliminates DDR memory stalls, yielding documented throughput gains exceeding 80–90%.
 - Academic research on graph traversal cache dynamics ([Coleman et al., *NeurIPS / arXiv:2104.03221*](https://arxiv.org/abs/2104.03221)) proves that irregular memory accesses during HNSW search degrade throughput by up to 40% when the graph spills outside LLC cache boundaries due to cold pointer chasing.
 
 ### 3. Topological Symmetry ([*Phoronix*](https://www.phoronix.com/review/amd-ryzen-7-7800x3d-linux))
@@ -177,11 +177,11 @@ chmod +x reproduce.sh
 
 ## References & Prior Art
 
-1. **Chips and Cheese** — [AMD’s Ryzen 9 7950X3D: Zen 4 Gets V-Cache](https://chipsandcheese.com/2023/03/05/amds-ryzen-9-7950x3d-zen-4-gets-v-cache/) (Microarchitectural latency analysis and stacked L3 SRAM delta characterization).
+1. **Chips and Cheese** — [AMD’s 7950X3D: Zen 4 Gets VCache](https://chipsandcheese.com/2023/04/23/amds-7950x3d-zen-4-gets-vcache/) (Microarchitectural latency analysis and stacked L3 SRAM delta characterization).
 2. **Phoronix** — [AMD Ryzen 7 7800X3D Linux Performance](https://www.phoronix.com/review/amd-ryzen-7-7800x3d-linux) (Linux kernel benchmarking and single-CCD symmetric topology analysis).
 3. **Coleman, B., Segarra, S., Shrivastava, A., Smola, A.** — [Graph Reordering for Cache-Efficient Near Neighbor Search](https://arxiv.org/abs/2104.03221) (NeurIPS / arXiv:2104.03221; formal analysis of pointer chasing, memory hierarchy stalls, and cache hit maximization in graph-based ANN algorithms like HNSW).
-4. **Qdrant Vector Database Research** — [Memory Types in Vector Search](https://qdrant.tech/articles/memory-types-in-vector-search/) (Analysis of in-memory caching tiers, RAM latency constraints, and quantization trade-offs).
-5. **AMD Corporation** — [Software Optimization Guide for the AMD Zen4 Microarchitecture (Pub #57647)](https://www.amd.com/content/dam/amd/en/documents/processor-tech-docs/programmer-references/57647.pdf) (Hardware architectural reference for Zen 4 core pipeline, dTLB hierarchies, and AVX-512 VNNI execution).
+4. **Qdrant Vector Database Research** — [Immutable Data Structures in Qdrant](https://qdrant.tech/articles/immutable-data-structures/) (Low-level performance analysis, CPU cache misses, and memory alignment in vector search).
+5. **AMD Corporation** — [Software Optimization Guide for the AMD Zen4 Microarchitecture (Pub #57647)](https://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/software-optimization-guides/57647.zip) (Hardware architectural reference for Zen 4 core pipeline, dTLB hierarchies, and AVX-512 VNNI execution; official ZIP distribution containing complete PDF manual).
 
 ---
 
