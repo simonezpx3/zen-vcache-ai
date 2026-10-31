@@ -2,6 +2,9 @@
 benchmarks/cache_cliff
 benchmarks/hugepages_test
 benchmarks/simd_l3_rag
+benchmarks/l3_lockless_ipc
+benchmarks/l3_hnsw_two_tier
+benchmarks/l3_zstd_dict_stream
 *.so
 *.o
 

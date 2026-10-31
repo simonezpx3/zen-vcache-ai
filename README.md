@@ -38,6 +38,10 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 - [Benchmark 3: TLB Mitigation via 2MB HugePages](#benchmark-3-tlb-mitigation-via-2mb-hugepages)
 - [Benchmark 4: Memory Bus Contention & Core Pinning Isolation](#benchmark-4-memory-bus-contention--core-pinning-isolation)
 - [Benchmark 5: Production Two-Stage L3 Vector RAG & AVX-512 SIMD Acceleration](#benchmark-5-production-two-stage-l3-vector-rag--avx-512-simd-acceleration)
+- [Benchmark 6: Hybrid GPU + L3-Resident Speculative Drafting & The 4-Core DDR5 Saturation Law](#benchmark-6-hybrid-gpu--l3-resident-speculative-drafting--the-4-core-ddr5-saturation-law)
+- [Benchmark 7: Nanosecond L3 Lockless Ring-Buffer IPC (/dev/shm)](#benchmark-7-nanosecond-l3-lockless-ring-buffer-ipc-devshm)
+- [Benchmark 8: Hierarchical Two-Tier L3 HNSW Vector Graph](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)
+- [Benchmark 9: Streaming In-L3 Zstandard Dictionary & LZ4 Decompression Pipeline](#benchmark-9-streaming-in-l3-zstandard-dictionary--lz4-decompression-pipeline)
 - [Practical Applications & Architecture Patterns](#practical-applications--architecture-patterns)
 - [Production Cheat Sheet: 4 Golden Rules for Systems Engineers](#production-cheat-sheet-4-golden-rules-for-systems-engineers)
 - [Repository Structure & Tooling](#repository-structure--tooling)
@@ -259,6 +263,76 @@ int32_t vnni_dot_product(const uint8_t* query_u8, const int8_t* centroid_s8, int
 
 ---
 
+## Benchmark 6: Hybrid GPU + L3-Resident Speculative Drafting & The 4-Core DDR5 Saturation Law
+
+When pairing an 8 GB discrete GPU (NVIDIA RTX 3070) running a 9B hybrid language model (`Qwen3.5-9B-Instruct-Q4_K_M`, 5.42 GiB, `c=8192` full FP16) with CPU-side speculative decoding on the Ryzen 7 7800X3D, a critical hardware boundary emerges between **dense draft models** and **L3-resident zero-weight predictors**:
+
+### 1. The 4-Core DDR5 Saturation Law (Why 0.5B Dense Drafts Spill Out of V-Cache)
+A quantized dense draft model (`Qwen2.5-Coder-0.5B-Q4_K_M`) occupies **462.96 MiB**—exceeding the 96 MB 3D V-Cache by **4.8×** and streaming all weights from dual-channel DDR5-6000 on every generated token:
+
+| CPU Thread Pinning (`vcache-run`, `jemalloc` + `hugetlb`) | Prompt Processing (`pp128`) | Token Generation (`tg64`) | Latency / Token | Microarchitectural Bottleneck |
+|:---|:---|:---|:---|:---|
+| **4 Physical Cores (`Cores 4–7`, `--profile infer`)** | `687.71 ± 1.44 t/s` | **`154.53 ± 0.89 t/s`** | `6.47 ms/tok` | Saturates dual-channel DDR5-6000 memory bus |
+| **8 Physical Cores (`Cores 0–7`, `--profile all`)** | `1096.21 ± 35.20 t/s` | **`131.17 ± 11.96 t/s`** | `7.62 ms/tok` | **-15.1% degradation** & **13.4× higher jitter** from memory controller contention |
+
+### 2. Hybrid GPU + L3-Resident Speculative Decoding (`< 12 MiB` L3 SRAM, `0 MiB` Extra VRAM)
+By replacing the 463 MiB dense draft model with an **L3-resident n-gram lookup state machine** (`--spec-type ngram-map-k4v,ngram-mod`) pinned strictly to `Cores 4–7` (`--spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1`), the entire drafting predictor (< 12 MiB) remains 100% inside the 96 MB 3D V-Cache while the RTX 3070 verifies draft tokens in parallel batches:
+
+| Inference Configuration (`Qwen3.5-9B-Q4_K_M`, `c=8192` Full FP16, `-ngl 99 -fa on`) | Prompt Processing | Token Generation | Speedup vs. Baseline | Extra GPU VRAM | L3 SRAM Footprint |
+|:---|:---|:---|:---|:---|:---|
+| **Pure GPU Baseline (Standard Thinking)** | `1,784.0 t/s` | `66.9 t/s` | `1.03×` | `0 MiB` | `0 MiB` |
+| **Pure GPU Baseline (Direct Code Generation)** | `1,878.7 t/s` | **`65.0 t/s`** | `1.00×` | `0 MiB` | `0 MiB` |
+| **Hybrid GPU + L3 Speculative (Greenfield Rust Code)** | `2,075.6 t/s` | **`87.9 t/s`** | **`1.35×` (+35.2%)** | **`0 MiB`** | **`< 12 MiB`** |
+| **Hybrid GPU + L3 Speculative (Code Refactoring / Edit)** | **`2,396.1 t/s`** | **`701.9 t/s`** | **`10.80×` (+979.8%)** | **`0 MiB`** | **`< 12 MiB`** |
+
+> **VRAM Footprint Note (`common_memory_breakdown_print`)**: Because `Qwen3.5-9B` utilizes a hybrid architecture (`24` linear Gated DeltaNet recurrent SSM layers requiring a fixed `50.25 MiB` state + `8` full-attention GQA layers requiring `256.00 MiB` at `c=8192` FP16), total `CUDA0` memory is **`5,279 MiB`** (`4,861 MiB` weights + `306.25 MiB` context + `112.02 MiB` compute), leaving **`1,987 MiB` (~2.0 GB) of free VRAM headroom** on an 8 GB RTX 3070 without KV cache quantization.
+
+---
+
+## Benchmark 7: Nanosecond L3 Lockless Ring-Buffer IPC (`/dev/shm`)
+
+Because all 8 cores of the Ryzen 7 7800X3D reside on a **single monolithic CCD sharing the unified 96 MB L3 SRAM**, inter-process communication (IPC) mapped over POSIX shared memory (`/dev/shm`) using cache-line isolated (64B/128B) lockless sequence barriers (Vyukov/Disruptor pattern) never leaves the L3 cache coherency domain (`benchmarks/l3_lockless_ipc.c`):
+
+| IPC Mechanism (Cross-Process: Producer on Core 0 $\leftrightarrow$ Consumer on Core 4) | One-Way Latency | Sustained Throughput | Bandwidth (128B Slot) | Relative Speedup |
+|:---|:---|:---|:---|:---|
+| **L3 Lockless Ring-Buffer (`/dev/shm`, 8.00 MiB Pipelined)** | **`2.48 ns / msg`** | **`402.89 M msgs/sec`** | **`48.03 GB/s`** | **`993.1×` faster** |
+| **L3 Lockless Ring-Buffer (`/dev/shm`, Ping-Pong RTT / 2)** | **`34.74 ns`** (`69.47 ns` RTT) | `28.78 M round-trips/s` | `3.68 GB/s` | **`71.0×` faster** |
+| **Linux Kernel `AF_UNIX` `socketpair` (`SOCK_STREAM`)** | `2,464.95 ns` | `0.41 M msgs/sec` | `0.05 GB/s` | `1.0×` (Baseline) |
+| **Subprocess `fork() + waitpid()` Invocation** | `78,967.98 ns` (`78.97 µs`) | `12.66 K spawns/sec` | — | `31,816×` slower |
+
+* **SIGKILL Crash Resilience & Zero-Leak Audit**: When an active consumer process is terminated mid-stream via `SIGKILL` (at message `10,000 / 40,000`), the lockless sequence ring incurs **0 producer deadlocks**, allows a hot-spawned recovery consumer to drain and verify all remaining `30,000` messages with **100.0% checksum integrity**, and leaves **0 orphaned descriptors** after `shm_unlink`.
+
+---
+
+## Benchmark 8: Hierarchical Two-Tier L3 HNSW Vector Graph
+
+Standard HNSW (Hierarchical Navigable Small World) graphs interleave full 512-dimensional `FP32` vectors (`2,048 B`) with neighbor adjacency lists (`64 B`), creating a **`201.42 MiB` working set at 100,000 vectors** that spills out of the 96 MB 3D V-Cache and stalls on ~65 ns DDR5 pointer chasing at every graph hop.
+
+In `benchmarks/l3_hnsw_two_tier.c`, the index is split into two hardware-aligned tiers:
+1. **Tier 1 (L3 Hot Navigation Partition, `30.52 MiB` for 100k vectors)**: Stores upper-layer entry centroids, Layer-0 adjacency lists (`64 B`), and a compact `256 B` unsigned `INT8` VNNI sketch (`320 B/node` total). Fits **100% inside the 96 MB 3D V-Cache**, executing greedy best-first graph traversal via AVX-512 VNNI (`_mm512_dpbusd_epi32`) at ~11 ns per hop.
+2. **Tier 2 (DDR5 Cold FP32 Storage, `195.31 MiB`)**: Accessed only once per query to exact-rescore the Top-36 shortlist.
+
+| HNSW Architecture (100,000 Vectors, 512-dim, `M=16`, `ef=36`) | Active Graph Footprint | Throughput (`QPS`) | Mean Latency / Query | `Recall@10` |
+|:---|:---|:---|:---|:---|
+| **Monolithic DRAM HNSW (Full FP32 on Every Hop)** | `201.42 MiB` (Spills to DDR5) | `36,928.2 QPS` | `27.08 µs` | `1.0000` |
+| **Two-Tier L3-Resident HNSW (L3 VNNI Walk + Top-36 FP32 Rescore)** | **`31.01 MiB` (100% L3 SRAM)** | **`62,733.0 QPS`** | **`15.94 µs`** | **`1.0000`** |
+| **Net Improvement** | **6.5× smaller hot footprint** | **`1.70×` (+69.9% QPS)** | **-41.1% latency** | **Zero recall loss** |
+
+---
+
+## Benchmark 9: Streaming In-L3 Zstandard Dictionary & LZ4 Decompression Pipeline
+
+Compressing structured JSONL agent transcripts and telemetry logs (~421 bytes/line) individually with standard Zstandard or LZ4 yields poor compression (`1.22×`) because the sliding window resets on every line. By training a **112 KiB Zstandard dictionary (`ZSTD_CDict` / `ZSTD_DDict`)** and pinning it inside the L2/L3 cache (`benchmarks/l3_zstd_dict_stream.c`), both per-record compression and single-core Zen 4 streaming decompression accelerate dramatically:
+
+| Compression Mode (8,000 JSONL Records, `3.21 MiB` Raw Corpus in L3) | Compressed Size | Compression Ratio | Single-Core Zen 4 Decompression Speed | Notes |
+|:---|:---|:---|:---|:---|
+| **Standard Zstd (Per-Line, No Dictionary)** | `2,700.63 KiB` | `1.22×` | `0.43 GB/s` | Baseline independent JSONL lines |
+| **Zstd + 112 KiB L3-Resident `ZSTD_DDict` (Per-Line)** | **`379.27 KiB`** | **`8.67×`** | **`2.31 GB/s`** | **7.12× smaller** & **5.37× faster** decompression |
+| **Zstd Framed Stream + 112 KiB L3 `ZSTD_DDict`** | **`166.96 KiB`** | **`19.70×`** | **`6.13 GB/s`** | Exceeds 3.5 GB/s target by **+75%** |
+| **LZ4 In-L3 Hot Block Stream (`LZ4_decompress_safe`)** | `265.67 KiB` | `12.38×` | **`21.34 GB/s`** | Sub-millisecond L3 context expansion |
+
+---
+
 ## Practical Applications & Architecture Patterns
 
 Beyond raw synthetic benchmarks, keeping targeted working sets under the 64MB–96MB L3 boundary unlocks distinct architectural patterns in production systems:
@@ -371,16 +445,23 @@ When designing software around L3 cache residency, several operational trade-off
 │   ├── cache_cliff.c              # Pointer-chasing cyclic permutation benchmark (8MB–256MB)
 │   ├── contention_benchmark.py    # DDR5 bus contention stress test with core pinning
 │   ├── hugepages_test.c           # 2MB HugePages vs standard 4KB paging benchmark
+│   ├── l3_hnsw_two_tier.c         # Two-Tier L3-resident HNSW graph vs monolithic DRAM HNSW
+│   ├── l3_lockless_ipc.c          # Nanosecond /dev/shm lockless ring-buffer IPC benchmark
+│   ├── l3_zstd_dict_stream.c      # In-L3 112 KiB Zstd dictionary & 21 GB/s LZ4 stream test
 │   ├── simd_l3_rag.c              # AVX-512 VPOPCNTDQ (Hamming) & VNNI (INT8) standalone test
 │   └── sqlite_l3_mmap.py          # SQLite FTS5 mmap vs page cache comparison
 ├── results/
 │   ├── baseline_probe_results.json # Hardware PMU flags and baseline query probe
 │   ├── cache_cliff_run.txt        # Raw latency numbers from 8MB to 256MB
 │   ├── contention_benchmark_results.json # Tail latency and jitter numbers under bus flood
-│   └── perf_stat_cache_cliff.txt  # Linux perf stat PMU event logs
+│   ├── l3_hnsw_two_tier_run.txt   # Two-tier L3 HNSW QPS and Recall@10 telemetry
+│   ├── l3_lockless_ipc_run.txt    # Cross-core /dev/shm lockless IPC latency & SIGKILL audit
+│   ├── l3_zstd_dict_stream_run.txt # Zstd dictionary and LZ4 in-L3 throughput logs
+│   ├── perf_stat_cache_cliff.txt  # Linux perf stat PMU event logs
+│   └── speculative_drafting_run.txt # Hybrid GPU + L3 speculative decoding & 4-core DDR5 saturation
 ├── tools/
 │   └── vcache-run                 # Unprivileged core affinity & jemalloc wrapper
-├── reproduce.sh                   # Automated build & benchmark runner (runs all 5 benchmarks)
+├── reproduce.sh                   # Automated build & benchmark runner (runs all 8 benchmarks)
 ├── LICENSE                        # MIT License
 └── README.md                      # Comprehensive microarchitectural report
 ```
