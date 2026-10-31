@@ -181,7 +181,7 @@ chmod +x reproduce.sh
 2. **Phoronix** — [AMD Ryzen 7 7800X3D Linux Performance](https://www.phoronix.com/review/amd-ryzen-7-7800x3d-linux) (Linux kernel benchmarking and single-CCD symmetric topology analysis).
 3. **Coleman, B., Segarra, S., Shrivastava, A., Smola, A.** — [Graph Reordering for Cache-Efficient Near Neighbor Search](https://arxiv.org/abs/2104.03221) (NeurIPS / arXiv:2104.03221; formal analysis of pointer chasing, memory hierarchy stalls, and cache hit maximization in graph-based ANN algorithms like HNSW).
 4. **Qdrant Vector Database Research** — [Immutable Data Structures in Qdrant](https://qdrant.tech/articles/immutable-data-structures/) (Low-level performance analysis, CPU cache misses, and memory alignment in vector search).
-5. **AMD Corporation** — [AMD Technical Documentation Portal](https://docs.amd.com/) (Publication #57647: *Software Optimization Guide for the AMD Zen4 Microarchitecture*; official architectural reference for Zen 4 core pipeline, dTLB hierarchies, and AVX-512 VNNI execution).
+5. **AMD Zen 4 Microarchitecture & Optimization** — [WikiChip Zen 4 Architecture Reference](https://en.wikichip.org/wiki/amd/microarchitectures/zen_4) (Comprehensive hardware analysis of Zen 4 core pipeline, L1/L2/L3 cache latencies, dTLB hierarchies, and dual-pumped AVX-512 VNNI execution; cross-referencing AMD Publication #57647).
 
 ---
 
