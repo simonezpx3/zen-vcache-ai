@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# vcache-run: Unprivileged Core Affinity & Memory Topology Wrapper
+# Architecture: AMD Zen 4 3D V-Cache (Ryzen 7 7800X3D - 8 Cores / Unified 96MB L3)
+# ==============================================================================
+set -euo pipefail
+
+PROG_NAME="vcache-run"
+VERSION="1.0.0"
+
+# Defaults
+DEFAULT_PROFILE="db"
+CORES=""
+PROFILE=""
+USE_JEMALLOC=1
+USE_HUGETLB=1
+VERBOSE=0
+
+JEMALLOC_LIB="/usr/lib/libjemalloc.so"
+[ ! -f "$JEMALLOC_LIB" ] && JEMALLOC_LIB="/usr/lib64/libjemalloc.so"
+
+usage() {
+    cat <<EOF
+Usage: $PROG_NAME [OPTIONS] [--] COMMAND [ARGS...]
+
+Zen 4 3D V-Cache thread pinning & memory allocation optimizer.
+Ensures zero thread migration across cores, enables jemalloc low-fragmentation
+allocator, and provisions glibc hugetlb tunables without CAP_SYS_ADMIN privileges.
+
+Profiles (8-core SMT-off layout):
+  db, isolated     Pin to cores 0-3 (SQLite WAL, arci-kb, IO/query pipelines)
+  infer, compute   Pin to cores 4-7 (AVX-512 VNNI, embedding search, micro-models)
+  all, full        Pin to all cores 0-7
+
+Options:
+  -p, --profile NAME     Select execution profile (db, infer, all) [default: $DEFAULT_PROFILE]
+  -c, --cores LIST       Specify explicit core list (e.g., 0-3, 4-7, 0,2,4,6)
+      --no-jemalloc      Disable libjemalloc preloading
+      --no-hugetlb       Disable glibc.malloc.hugetlb tunable
+  -v, --verbose          Print active configuration before execution
+  -V, --version          Show version
+  -h, --help             Show this help message
+
+Examples:
+  $PROG_NAME --profile db arci-kb search "3D cache"
+  $PROG_NAME -c 4-7 python3 -m arci_route "analyze this bug"
+  $PROG_NAME -- sqlite3 cache.db "SELECT * FROM chunks;"
+EOF
+    exit 0
+}
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        -V|--version)
+            echo "$PROG_NAME version $VERSION"
+            exit 0
+            ;;
+        -v|--verbose)
+            VERBOSE=1
+            shift
+            ;;
+        -p|--profile)
+            PROFILE="$2"
+            shift 2
+            ;;
+        -c|--cores)
+            CORES="$2"
+            shift 2
+            ;;
+        --no-jemalloc)
+            USE_JEMALLOC=0
+            shift
+            ;;
+        --no-hugetlb)
+            USE_HUGETLB=0
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "Error: Unknown option '$1'" >&2
+            echo "Run '$PROG_NAME --help' for usage." >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [[ $# -eq 0 ]]; then
+    echo "Error: No command specified." >&2
+    echo "Run '$PROG_NAME --help' for usage." >&2
+    exit 1
+fi
+
+# Determine core assignment
+if [[ -z "$CORES" ]]; then
+    PROFILE="${PROFILE:-$DEFAULT_PROFILE}"
+    case "$PROFILE" in
+        db|isolated)
+            CORES="0-3"
+            ;;
+        infer|compute)
+            CORES="4-7"
+            ;;
+        all|full)
+            CORES="0-7"
+            ;;
+        *)
+            echo "Error: Unknown profile '$PROFILE'. Available: db, infer, all" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+# Calculate thread count from core list
+# (Handles simple ranges like 0-3, 4-7, or comma-separated lists)
+if [[ "$CORES" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    START="${BASH_REMATCH[1]}"
+    END="${BASH_REMATCH[2]}"
+    NUM_THREADS=$(( END - START + 1 ))
+elif [[ "$CORES" =~ , ]]; then
+    NUM_THREADS=$(echo "$CORES" | tr ',' '\n' | wc -l)
+else
+    NUM_THREADS=1
+fi
+
+# Build environment overrides
+ENV_VARS=()
+ENV_VARS+=("OMP_NUM_THREADS=${OMP_NUM_THREADS:-$NUM_THREADS}")
+ENV_VARS+=("OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-$NUM_THREADS}")
+ENV_VARS+=("MKL_NUM_THREADS=${MKL_NUM_THREADS:-$NUM_THREADS}")
+
+# Jemalloc configuration
+if [[ "$USE_JEMALLOC" -eq 1 && -f "$JEMALLOC_LIB" ]]; then
+    if [[ -n "${LD_PRELOAD:-}" ]]; then
+        ENV_VARS+=("LD_PRELOAD=${JEMALLOC_LIB}:${LD_PRELOAD}")
+    else
+        ENV_VARS+=("LD_PRELOAD=${JEMALLOC_LIB}")
+    fi
+    ENV_VARS+=("MALLOC_CONF=background_thread:true,metadata_thp:auto,dirty_decay_ms:1000,muzzy_decay_ms:0")
+fi
+
+# Hugetlb tunable
+if [[ "$USE_HUGETLB" -eq 1 ]]; then
+    if [[ -n "${GLIBC_TUNABLES:-}" ]]; then
+        ENV_VARS+=("GLIBC_TUNABLES=${GLIBC_TUNABLES}:glibc.malloc.hugetlb=1")
+    else
+        ENV_VARS+=("GLIBC_TUNABLES=glibc.malloc.hugetlb=1")
+    fi
+fi
+
+if [[ "$VERBOSE" -eq 1 ]]; then
+    cat <<EOF
+[vcache-run] Topology: AMD Zen 4 3D V-Cache (Ryzen 7 7800X3D)
+[vcache-run] Pinned Cores: $CORES (Threads: $NUM_THREADS)
+[vcache-run] Memory Policy: jemalloc=$([ "$USE_JEMALLOC" -eq 1 ] && echo "enabled" || echo "disabled"), hugetlb=$([ "$USE_HUGETLB" -eq 1 ] && echo "enabled" || echo "disabled")
+[vcache-run] Command: "$@"
+EOF
+fi
+
+# Execute unprivileged with taskset
+exec taskset -c "$CORES" env "${ENV_VARS[@]}" "$@"

@@ -30,6 +30,24 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 
 ---
 
+## Table of Contents
+
+- [Architectural Context: Single-CCD Advantage](#architectural-context-single-ccd-advantage)
+- [Benchmark 1: The Hardware Cache Cliff (Pointer Chasing)](#benchmark-1-the-hardware-cache-cliff-pointer-chasing)
+- [Benchmark 2: SQLite L3 Memory-Mapped Residency](#benchmark-2-sqlite-l3-memory-mapped-residency)
+- [Benchmark 3: TLB Mitigation via 2MB HugePages](#benchmark-3-tlb-mitigation-via-2mb-hugepages)
+- [Benchmark 4: Memory Bus Contention & Core Pinning Isolation](#benchmark-4-memory-bus-contention--core-pinning-isolation)
+- [Benchmark 5: Production Two-Stage L3 Vector RAG & AVX-512 SIMD Acceleration](#benchmark-5-production-two-stage-l3-vector-rag--avx-512-simd-acceleration)
+- [Practical Applications & Architecture Patterns](#practical-applications--architecture-patterns)
+- [Production Cheat Sheet: 4 Golden Rules for Systems Engineers](#production-cheat-sheet-4-golden-rules-for-systems-engineers)
+- [Repository Structure & Tooling](#repository-structure--tooling)
+- [External Validation & Microarchitectural Corroboration](#external-validation--microarchitectural-corroboration)
+- [Production Gotchas & Engineering Trade-offs](#production-gotchas--engineering-trade-offs)
+- [Reproducing the Benchmarks](#reproducing-the-benchmarks)
+- [References & Prior Art](#references--prior-art)
+
+---
+
 ## Architectural Context: Single-CCD Advantage
 
 Unlike dual-CCD models (e.g., Ryzen 9 7900X3D and 7950X3D), where only one CCD carries the stacked 3D V-Cache tile—introducing asymmetric cross-CCD NUMA-like latency penalties and requiring OS thread parking—the **Ryzen 7 7800X3D consists of a single monolithic 8C/16T CCD**:
@@ -345,12 +363,46 @@ When designing software around L3 cache residency, several operational trade-off
 
 ---
 
+## Repository Structure & Tooling
+
+```
+.
+├── benchmarks/
+│   ├── cache_cliff.c              # Pointer-chasing cyclic permutation benchmark (8MB–256MB)
+│   ├── contention_benchmark.py    # DDR5 bus contention stress test with core pinning
+│   ├── hugepages_test.c           # 2MB HugePages vs standard 4KB paging benchmark
+│   ├── simd_l3_rag.c              # AVX-512 VPOPCNTDQ (Hamming) & VNNI (INT8) standalone test
+│   └── sqlite_l3_mmap.py          # SQLite FTS5 mmap vs page cache comparison
+├── results/
+│   ├── baseline_probe_results.json # Hardware PMU flags and baseline query probe
+│   ├── cache_cliff_run.txt        # Raw latency numbers from 8MB to 256MB
+│   ├── contention_benchmark_results.json # Tail latency and jitter numbers under bus flood
+│   └── perf_stat_cache_cliff.txt  # Linux perf stat PMU event logs
+├── tools/
+│   └── vcache-run                 # Unprivileged core affinity & jemalloc wrapper
+├── reproduce.sh                   # Automated build & benchmark runner (runs all 5 benchmarks)
+├── LICENSE                        # MIT License
+└── README.md                      # Comprehensive microarchitectural report
+```
+
+### The `vcache-run` Tool
+This repository includes `tools/vcache-run`, an unprivileged CLI wrapper that isolates database and micro-AI tasks without root/setuid privileges:
+```bash
+# Isolate SQLite or Vector RAG on Cores 0-3 with jemalloc and hugetlb tunables:
+./tools/vcache-run --profile db python3 -m arci_kb search "query"
+
+# Isolate compute and model tasks on Cores 4-7:
+./tools/vcache-run --profile infer python3 my_model.py
+```
+
+---
+
 ## Reproducing the Benchmarks
 
 ### Prerequisites
 - Linux running on AMD Zen 4/5 X3D processor (e.g., Ryzen 7 7800X3D, 9800X3D).
-- `gcc` with AVX-512 and `-march=native` support.
-- Python 3.8+ with `sqlite3`.
+- `gcc` with AVX-512 support (`-mavx512f -mavx512vpopcntdq -mavx512vnni -mavx512bw -march=native`).
+- Python 3.8+ with `sqlite3` and `numpy`.
 - `perf` (Linux tools) for hardware PMU telemetry.
 
 ### Running the Suite

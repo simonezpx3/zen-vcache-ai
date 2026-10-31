@@ -1,12 +1,16 @@
 # Binaries
 benchmarks/cache_cliff
 benchmarks/hugepages_test
+benchmarks/simd_l3_rag
+*.so
+*.o
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.ruff_cache/
 
 # Temporary and local databases
 *.db

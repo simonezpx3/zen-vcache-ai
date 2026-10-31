@@ -174,7 +174,7 @@ def main():
         "jitter_reduction_pct": jitter_reduction
     }
     out_file.write_text(json.dumps(results, indent=2), encoding="utf-8")
-    print(f"Detailed metrics saved to: {out_file}")
+    print(f"Detailed metrics saved to: results/{out_file.name}")
 
 
 if __name__ == "__main__":
