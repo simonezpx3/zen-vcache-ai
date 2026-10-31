@@ -1,0 +1,35 @@
+{
+  "hardware": "AMD Ryzen 7 7800X3D (8C/8T, 96MB 3D V-Cache)",
+  "workload": "L3 Vector RAG Search (1252 docs)",
+  "stress_condition": "4x 128MB DDR5 memory thrashing threads on cores 4-7",
+  "num_queries": 400,
+  "quiet": {
+    "p50_us": 602.9085,
+    "p90_us": 633.317,
+    "p95_us": 636.957,
+    "p99_us": 642.48459,
+    "max_us": 649.625,
+    "mean_us": 606.8216125,
+    "std_us": 16.51928487623916
+  },
+  "unpinned": {
+    "p50_us": 672.075,
+    "p90_us": 718.357,
+    "p95_us": 729.0744499999998,
+    "p99_us": 790.0083999999999,
+    "max_us": 1070.564,
+    "mean_us": 672.1253575000001,
+    "std_us": 45.49758364066924
+  },
+  "vcache_run_isolated": {
+    "p50_us": 660.765,
+    "p90_us": 696.8181,
+    "p95_us": 717.1305,
+    "p99_us": 759.8394,
+    "max_us": 998.873,
+    "mean_us": 657.7096075,
+    "std_us": 39.95579389936388
+  },
+  "p99_improvement_us": 30.168999999999983,
+  "jitter_reduction_pct": 12.18040453548764
+}
