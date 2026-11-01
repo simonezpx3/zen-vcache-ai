@@ -410,6 +410,25 @@ In Mixture-of-Experts (MoE) inference (e.g., 24 layers with an always-active **`
 
 ## Practical Applications & Architecture Patterns
 
+### The 3-Tier Local AI Memory Pyramid: Turning 3D V-Cache into a 628 GB/s Co-Processor
+
+When building local AI workstations around an AMD X3D processor and a discrete GPU, treating the CPU as a "slow DDR5 device" wastes its strongest asset. Inside the **64 MB Safe Boundary**, the Ryzen 7 7800X3D delivers **`628.3 GB/s` of measured AVX-512 `VPERMB` read bandwidth at `11.0 ns` latency**—exceeding the `448 GB/s` GDDR6 bandwidth of an NVIDIA RTX 3070 while offering ~20× lower access latency:
+
+| Memory Tier | Hardware Medium | Measured Bandwidth | Access Latency | Optimal AI / Systems Workload Assignment |
+|:---|:---|:---:|:---:|:---|
+| **Tier 0 (GPU VRAM)** | RTX 3070 (`8 GB GDDR6`) / RTX 3090 (`24 GB GDDR6X`) | `448 – 936 GB/s` | `~200–300 ns` | **100% Dedicated to Primary LLM / DiT**: Dense Backbone Weights, Multi-Head Attention & Long-Context FP16 KV Cache |
+| **Tier 1 (3D V-Cache)** | **Ryzen 7 7800X3D (`64 MB` Safe Zone in `96 MB` L3)** | **`628.3 GB/s`** *(AVX-512 `VPERMB`)* / `~1.3 TB/s` peak | **`10.6 – 11.4 ns`** | **Zero-VRAM AI Co-Processor (8 Cores)**: `PQ64` 1M-Vector RAG (`61 MiB`), Two-Tier HNSW (`31 MiB`), 1.58-Bit Ternary LUT Drafter (`56 MiB`), MoE Shared Expert (`48 MiB`), VNNI Router, `/dev/shm` IPC & `112 KiB` Zstd Dict |
+| **Tier 2 (System RAM)** | Dual-Channel DDR5-6000 (`32–64 GB`) | `60 – 93 GB/s` | `~60 – 75 ns` | **Cold Bulk Storage (4 Cores + `_MM_HINT_NTA` Guard)**: Sparse Cold MoE Experts, Raw Document Texts & Archive Logs (streamed via `VMOVNTDQA` without evicting Tier 1) |
+
+#### Architectural Impact Across GPU Classes (Empirical 8 GB Rig + 24 GB Scaling Blueprint)
+
+| Workstation Tier | Without 3D V-Cache Offload (Standard Setup) | With 3-Tier 3D V-Cache Co-Processor Architecture | Net Engineering Gain |
+|:---|:---|:---|:---|
+| **8 GB GPU Rig** *(e.g. RTX 3070 / 4060 Ti)* **[Measured]** | `9B Q4_K_M` (`5.3 GB`) leaves `<2 GB` VRAM; adding GPU RAG embeddings or a 0.5B draft model triggers PCIe OOM thrashing (`~1–5 t/s`). | Primary `9B` (`c=8192` FP16) owns GPU VRAM; L3 hosts speculative drafter (`701.9 t/s` edit / `87.9 t/s` new), 1M `PQ64` RAG (`102 µs`), and VNNI router (`72 µs`). | **`0 MiB` auxiliary VRAM**, **`1.35×–10.8×` faster** LLM generation, sub-ms RAG. |
+| **24 GB GPU Rig** *(e.g. RTX 3090 / 4090)* **[Architectural Projection]** | `32B Q4_K_M` (`~19.8 GB`) or `40B MoE` (`~21.5 GB`) leaves only `2–4 GB` VRAM—forcing quantization downgrade (`Q3_K_S`) or short context (`4k`) to fit RAG + draft models. | **100% of 24 GB GDDR6X** stays dedicated to `32B–40B Q4_K_M` + **`32k–64k` KV cache**; 7800X3D L3 feeds speculative drafts at `0.09 ms/tok` and holds the MoE Shared Expert (`48 MiB`). | Saves **`2.5–4.0 GB` VRAM**, enables **batch-verified speculative speedup** on 32B models, and unlocks **50B–80B+ Hybrid MoE** via Tier 0 + Tier 1 + Tier 2 split. |
+
+---
+
 Beyond raw synthetic benchmarks, keeping targeted working sets under the 64MB–96MB L3 boundary unlocks distinct architectural patterns in production systems:
 
 ### 1. Zero-VRAM Co-existence for Multi-Model Systems
@@ -535,6 +554,17 @@ The empirical latency curves and architectural observations captured in this rep
 ### 3. Topological Symmetry ([*Phoronix*](https://www.phoronix.com/review/amd-ryzen-7-7800x3d-linux))
 - Workstation evaluations and Linux kernel scheduler benchmarks on [*Phoronix*](https://www.phoronix.com/review/amd-ryzen-7-7800x3d-linux) highlight the architectural simplicity of the Ryzen 7 7800X3D's single-CCD topology.
 - Unlike multi-CCD architectures (such as the 7900X3D/7950X3D or multi-socket platforms), which exhibit non-uniform Infinity Fabric cross-CCD latency penalties (~70 ns cross-die hops) and require complex thread-parking heuristics, the 7800X3D provides uniform, symmetric 96MB L3 access across all 8 cores without NUMA-like degradation.
+
+### 4. Industry SOTA Comparison Matrix (Measured L3 Kernels vs. Published Baselines)
+
+To contextualize the empirical measurements in Benchmarks 1–13 against established industry standards, the table below compares published state-of-the-art (SOTA) CPU baselines against our L3-resident kernels on the Ryzen 7 7800X3D:
+
+| Technical Domain | Published Industry Standard (SOTA) | Measured 7800X3D 3D V-Cache Result | Architectural Reason for Delta |
+|:---|:---|:---|:---|
+| **Cross-Process Shared Memory IPC** *(Aeron IPC / LMAX Disruptor / Rigtorp SPSC)* | **`35 – 70 ns`** one-way (`RTT/2` across processes)<br>`15 – 35 ns` (inter-thread, single process) | **`34.74 ns` `RTT/2`** (cross-process `/dev/shm`)<br>**`2.48 ns / msg`** (`402.9M msg/s` pipelined) | Matches the physical lower bound of inter-thread x86 SPSC queues across *separate OS processes* because all 8 cores share a single monolithic L3 coherency domain (`0 ns` cross-CCD penalty). |
+| **1,000,000-Vector ANN / PQ Search** *(Meta Faiss AVX-512 FastScan / USearch / Qdrant)* | **Faiss IVF-PQ**: `10k–20k QPS` (`500–2000 µs`)<br>**USearch HNSW**: `5k–15k QPS` (`300–1500 µs`)<br>**Qdrant**: `1.2k–4.5k QPS` (`3000–8000 µs`) | **Exhaustive 1M `PQ64` (8C)**: `9,784 QPS` (**`102.2 µs`**)<br>**IVF + `PQ64` Top-4096 (1C)**: **`392,240 QPS` (`2.55 µs`)**<br>**100k Two-Tier HNSW**: **`62,733 QPS` (`15.9 µs`)** | Standard 1M-vector indices (`300–800 MB`) spill into DDR5 (`~60 GB/s`). Compressing 1M vectors into a `61.04 MiB` transposed `PQ64` layout keeps 100% of the index in L3 SRAM at **`626.2 GB/s`**. *(Note: kernel-level measurement vs. full DBMS stack).* |
+| **Sub-2-Bit LUT LLM Inference** *(Microsoft `T-MAC` / `bitnet.cpp` on Desktop x86)* | **DDR5-Bound Desktop CPU**:<br>`~90 – 110 GB/s` effective weight read bandwidth | **`256 MiB` in DDR5 (4C)**: `93.18 GB/s` (`347 tok/s`)<br>**`56 MiB` in 3D V-Cache (8C)**: **`628.33 GB/s` (`10,700 tok/s`, `2.51 TOPS`)** | When spilling to DDR5 (`256 MiB`), our kernel matches standard `T-MAC` (`93.2 GB/s`). When sized under `64 MB` (`~280M` 1.58-bit ternary parameters), `VPERMB` scales across all 8 cores at **6.7× higher L3 bandwidth**. |
+| **Zstandard & LZ4 Decompression** *(Standard `lzbench` on Zen 4, 1 Core)* | **Standard Zstd (1C)**: `1.5 – 3.5 GB/s`<br>**Standard LZ4 (1C)**: `4.5 – 8.0 GB/s` (from RAM) | **Zstd + `112 KiB` L3 Dict**: **`6.13 GB/s`** (`19.7×` ratio)<br>**LZ4 In-L3 Hot Block**: **`21.34 GB/s`** | Pinning the `112 KiB` `ZSTD_DDict` and hot stream buffers inside L2/L3 eliminates DRAM page walks and memory bus stalls. |
 
 ---
 
