@@ -14,7 +14,24 @@ Hardware PMU telemetry and benchmarks demonstrating low-latency memory residency
 
 AMD's 3D V-Cache is widely recognized for accelerating cache-sensitive gaming workloads. In systems programming and edge database engineering, however, the **monolithic 96MB L3 SRAM pool** on the Ryzen 7 7800X3D offers a distinctive advantage: an entire active working set—including database pages, index structures, and INT8 model weights—can reside entirely within L3 cache with ~10–11 ns access latency and ~1.3 TB/s aggregate bandwidth on a single 8C CCD, minimizing steady-state DRAM memory traffic and bypassing the ~70 ns DDR5 bus latency stalls.
 
-This repository provides reproducible benchmarks and raw Linux PMU hardware performance counter logs (`perf stat`) characterizing the memory boundary, SQLite zero-copy performance, and TLB mitigation.
+This repository provides reproducible benchmarks and raw Linux PMU hardware performance counter logs (`perf stat`) characterizing the memory boundary, SQLite zero-copy performance, TLB mitigation, and zero-VRAM micro-AI pipelines.
+
+### TL;DR: Production Impact Scorecard
+
+| Workload / Subsystem | Standard Baseline (DRAM / Kernel) | 3D V-Cache Resident (`<= 64 MB`) | Measured Functional Impact |
+|:---|:---|:---|:---|
+| **[LLM Speculative Decoding](#benchmark-6-hybrid-gpu--l3-resident-speculative-drafting--the-4-core-ddr5-saturation-law)** (`Qwen3.5-9B` on 8GB GPU) | `65.0 t/s` (Pure GPU) | **`701.9 t/s`** (edit) / **`87.9 t/s`** (new) | **`10.8×` speedup**, **`0 MiB` extra VRAM** (`<12 MiB` L3 n-gram) |
+| **[Cross-Process IPC](#benchmark-7-nanosecond-l3-lockless-ring-buffer-ipc-devshm)** (`/dev/shm` lockless ring) | `2,465 ns` (`AF_UNIX` socket) | **`2.48 ns`** (pipe) / **`34.7 ns`** (RTT/2) | **`993×` lower latency**, **`402.9M msg/s`**, `SIGKILL`-safe |
+| **[HNSW Vector Search](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)** (100k vectors, 512-dim) | `36,928 QPS` (`201 MiB` FP32 in DDR5) | **`62,733 QPS`** (`31 MiB` INT8 sketch in L3) | **`+69.9%` throughput**, **`-41.1%` latency** at `1.0000` Recall |
+| **[Two-Stage Vector RAG & Router](#benchmark-5-production-two-stage-l3-vector-rag--avx-512-simd-acceleration)** (`AVX-512`) | GPU / DRAM FP32 embeddings | **`202 µs`** 1-bit scan / **`72 µs`** VNNI router | **Sub-ms CPU RAG & routing**, **`0 MiB` GPU VRAM** |
+| **[JSONL Telemetry Compression](#benchmark-9-streaming-in-l3-zstandard-dictionary--lz4-decompression-pipeline)** (8k agent logs) | `1.22×` ratio, `0.43 GB/s` (std Zstd) | **`8.67×–19.7×`** ratio, **`6.13 GB/s`** (`112 KiB` L3 dict) | **`7.1×` smaller logs**, **`14.2×` faster** decompression |
+| **[SQLite Zero-Copy & 2MB HugePages](#benchmark-2-sqlite-l3-memory-mapped-residency)** | `60.8 ns` DDR5, `899k` dTLB misses | **`11.0 ns` L3 mmap**, **`17k` dTLB misses** | **`-98.1%` dTLB misses**, **`-65.5%` kernel CPU time** |
+
+> [!IMPORTANT]
+> **Three Counter-Intuitive Hardware Laws Verified on Zen 4 3D V-Cache:**
+> 1. **The 64 MB Safe Boundary (Not 96 MB):** Between **8 MB and 64 MB**, random access latency stays completely flat at **10.6–11.3 ns** (whereas standard 32 MB Zen 4 chips spill to >40 ns DRAM past 32 MB). Above 64 MB, OS and thread stack contention begins, pushing 96 MB latency to **29.6 ns**.
+> 2. **The 4-Core DDR5 Saturation Law:** Once a CPU model or buffer exceeds the 96 MB L3 ceiling and spills into DDR5 (e.g., a 463 MiB 0.5B GGUF draft model), **4 physical cores (`154.5 t/s`) outperform all 8 cores (`131.2 t/s`) by +15.1%** with **13.4× lower latency jitter**—4 Zen 4 cores completely saturate dual-channel DDR5-6000 bandwidth, and adding more cores triggers memory-controller bank thrashing.
+> 3. **Zero-VRAM Speculative Co-Existence:** On VRAM-constrained 8 GB GPUs (RTX 3070), replace neural draft models with an **L3-resident n-gram lookup state machine (`< 12 MiB` L3, `0 MiB` VRAM)** pinned to Cores 4–7 to achieve **1.35×–10.80×** generation speedup without touching GPU memory or the DDR5 bus.
 
 ### Test Rig & Environment Specifications
 
