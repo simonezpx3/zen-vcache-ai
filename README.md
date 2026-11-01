@@ -634,26 +634,8 @@ chmod +x reproduce.sh
 
 ---
 
-## Citation
-
-If you reference these empirical findings, architectural laws (*The 64 MB Safe Boundary*, *The 4-Core DDR5 Saturation Law*, *Non-Temporal Exclusive L3 Victim Guard*), or SIMD kernels in academic papers, technical articles, or engineering documentation, please cite:
-
-```bibtex
-@software{simonezpx3_2026_vcache,
-  author       = {simonezpx3},
-  title        = {{Cache-Resident Working Sets: Exploiting Zen 4 96MB V-Cache for Sub-Millisecond SQLite \& Edge Micro-AI}},
-  year         = 2026,
-  month        = nov,
-  version      = {2.0.0},
-  url          = {https://github.com/simonezpx3/ryzen-7800x3d-vcache-benchmarks},
-  license      = {Apache-2.0}
-}
-```
-
----
-
 ## License & Trademark Disclaimer
 
-Copyright 2026 `simonezpx3`. Licensed under the **Apache License, Version 2.0** (see [LICENSE](LICENSE) and [NOTICE](NOTICE) for full terms and mandatory attribution requirements).
+Copyright 2026 `simonezpx3`. Licensed under the **Apache License, Version 2.0** (see [LICENSE](LICENSE) for details).
 
 *Disclaimer: AMD, Ryzen, Zen 4, EPYC, and 3D V-Cache are trademarks or registered trademarks of Advanced Micro Devices, Inc. This repository represents independent systems engineering research and is not affiliated with or endorsed by AMD.*

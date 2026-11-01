@@ -1,13 +1,2 @@
 Cache-Resident Working Sets: Exploiting Zen 4 96MB V-Cache for Sub-Millisecond SQLite & Edge Micro-AI
 Copyright 2026 simonezpx3 (https://github.com/simonezpx3/ryzen-7800x3d-vcache-benchmarks)
-
-This product includes original microarchitectural research, AVX-512 SIMD kernels,
-and empirical benchmarks developed by simonezpx3, including:
-  - The 64 MB Safe Boundary & Hardware Cache Cliff characterization on AMD 3D V-Cache
-  - The 4-Core DDR5 Saturation Law vs. 8-Core L3 SRAM Scaling
-  - Non-Temporal Exclusive L3 Victim Guard (_MM_HINT_NTA & VMOVNTDQA)
-  - Two-Tier L3-Resident HNSW & 1,000,000-Vector PQ64 AVX-512 VPERMB FastScan
-  - Nanosecond L3 Lockless Ring-Buffer IPC (/dev/shm)
-
-Under Section 4(d) of the Apache License, Version 2.0, any Derivative Works or
-redistributions in source or binary form must retain this attribution notice.
