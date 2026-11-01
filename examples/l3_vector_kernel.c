@@ -70,6 +70,12 @@ void avx512_batch_rerank_candidates(
     int32_t* scores_out
 ) {
     for (int i = 0; i < num_candidates; i++) {
+        if (i + 2 < num_candidates) {
+            const int8_t* next_vec = doc_int8_matrix + (size_t)candidate_indices[i + 2] * 512;
+            for (int b = 0; b < 512; b += 64) {
+                _mm_prefetch((const char*)(next_vec + b), _MM_HINT_NTA);
+            }
+        }
         int idx = candidate_indices[i];
         const int8_t* doc_vec = doc_int8_matrix + (size_t)idx * 512;
         scores_out[i] = avx512_int8_dot_512(query_s8, doc_vec);

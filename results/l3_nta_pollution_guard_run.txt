@@ -1,0 +1,9 @@
+====================================================================================================
+ Benchmark 11: Non-Temporal L3 Pollution Guard (48 MiB Hot L3 Index + 64 MiB Cold DDR5 Stream)
+====================================================================================================
+  1. Quiet Hot 48 MiB L3 Index Baseline            :  11.56 ns / hop (100% L3 SRAM Hit)
+  2. After 64 MiB Temporal Cold DDR5 Scan          :  39.14 ns / hop (+238.6% L3 Eviction Penalty)
+  3. After 64 MiB Non-Temporal Guarded DDR5 Scan   :  11.05 ns / hop (3.54x faster than Temporal)
+----------------------------------------------------------------------------------------------------
+  Result: Non-Temporal Guard eliminates 101.9% of the L3 cache eviction latency penalty (sink=64)
+====================================================================================================

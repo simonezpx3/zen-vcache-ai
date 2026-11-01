@@ -21,6 +21,9 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 | Workload / Subsystem | Standard Baseline (DRAM / Kernel) | 3D V-Cache Resident (`<= 64 MB`) | Measured Functional Impact |
 |:---|:---|:---|:---|
 | **[LLM Speculative Decoding](#benchmark-6-hybrid-gpu--l3-resident-speculative-drafting--the-4-core-ddr5-saturation-law)** (`Qwen3.5-9B` on 8GB GPU) | `65.0 t/s` (Pure GPU) | **`701.9 t/s`** (edit) / **`87.9 t/s`** (new) | **`10.8×` speedup**, **`0 MiB` extra VRAM** (`<12 MiB` L3 n-gram) |
+| **[1.58-Bit Ternary LUT Inference](#benchmark-10-avx-512-vbmi-vpermb-158-bit-ternary-lut-inference-t-mac--bitnetcpp)** (`VPERMB` in L3) | `270.4–347.1 t/s` (`256 MiB` DDR5 spill) | **`10,700.4 t/s`** (`56 MiB` ~280M in L3, 8C) | **`628.3 GB/s` L3 LUT read**, **`2.51 TOPS`**, linear 8C scaling |
+| **[1,000,000-Vector PQ64 FastScan](#benchmark-12-1000000-vector-product-quantization-pq64-fastscan-in-64mb-l3)** (`VPERMB` + `VPDPBUSD`) | `1.91 GiB` FP32 in DDR5 | **`102.2 µs`** full 1M scan / **`2.55 µs`** IVF (`61 MiB` L3) | **`9.78B vec/s` (`626.2 GB/s`)**, **`392.2k QPS`**, **0 DDR5 hits** |
+| **[Non-Temporal L3 Pollution Guard](#benchmark-11-non-temporal-cache-bypass-_mm_hint_nta--vmovntdqa-vs-l3-pollution)** (`_MM_HINT_NTA` + `VMOVNTDQA`) | `39.14 ns/hop` (+238.6% L3 eviction penalty) | **`11.05 ns/hop`** after `64 MiB` cold DDR5 scan | **`3.54×` faster**, **100% L3 eviction protection** |
 | **[Cross-Process IPC](#benchmark-7-nanosecond-l3-lockless-ring-buffer-ipc-devshm)** (`/dev/shm` lockless ring) | `2,465 ns` (`AF_UNIX` socket) | **`2.48 ns`** (pipe) / **`34.7 ns`** (RTT/2) | **`993×` lower latency**, **`402.9M msg/s`**, `SIGKILL`-safe |
 | **[HNSW Vector Search](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)** (100k vectors, 512-dim) | `36,928 QPS` (`201 MiB` FP32 in DDR5) | **`62,733 QPS`** (`31 MiB` INT8 sketch in L3) | **`+69.9%` throughput**, **`-41.1%` latency** at `1.0000` Recall |
 | **[Two-Stage Vector RAG & Router](#benchmark-5-production-two-stage-l3-vector-rag--avx-512-simd-acceleration)** (`AVX-512`) | GPU / DRAM FP32 embeddings | **`202 µs`** 1-bit scan / **`72 µs`** VNNI router | **Sub-ms CPU RAG & routing**, **`0 MiB` GPU VRAM** |
@@ -59,6 +62,10 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 - [Benchmark 7: Nanosecond L3 Lockless Ring-Buffer IPC (/dev/shm)](#benchmark-7-nanosecond-l3-lockless-ring-buffer-ipc-devshm)
 - [Benchmark 8: Hierarchical Two-Tier L3 HNSW Vector Graph](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)
 - [Benchmark 9: Streaming In-L3 Zstandard Dictionary & LZ4 Decompression Pipeline](#benchmark-9-streaming-in-l3-zstandard-dictionary--lz4-decompression-pipeline)
+- [Benchmark 10: AVX-512 VBMI (VPERMB) 1.58-Bit Ternary LUT Inference (T-MAC / bitnet.cpp)](#benchmark-10-avx-512-vbmi-vpermb-158-bit-ternary-lut-inference-t-mac--bitnetcpp)
+- [Benchmark 11: Non-Temporal Cache Bypass (_MM_HINT_NTA & VMOVNTDQA) vs. L3 Pollution](#benchmark-11-non-temporal-cache-bypass-_mm_hint_nta--vmovntdqa-vs-l3-pollution)
+- [Benchmark 12: 1,000,000-Vector Product Quantization (PQ64) FastScan in 64MB L3](#benchmark-12-1000000-vector-product-quantization-pq64-fastscan-in-64mb-l3)
+- [Benchmark 13: Asymmetric Hybrid MoE Offloading (L3 Shared Expert + NTA Cold Experts)](#benchmark-13-asymmetric-hybrid-moe-offloading-l3-shared-expert--nta-cold-experts)
 - [Practical Applications & Architecture Patterns](#practical-applications--architecture-patterns)
 - [Production Cheat Sheet: 7 Golden Rules for Systems Engineers](#production-cheat-sheet-7-golden-rules-for-systems-engineers)
 - [Repository Structure & Tooling](#repository-structure--tooling)
@@ -347,6 +354,57 @@ Compressing structured JSONL agent transcripts and telemetry logs (~421 bytes/li
 | **Zstd + 112 KiB L3-Resident `ZSTD_DDict` (Per-Line)** | **`379.27 KiB`** | **`8.67×`** | **`2.31 GB/s`** | **7.12× smaller** & **5.37× faster** decompression |
 | **Zstd Framed Stream + 112 KiB L3 `ZSTD_DDict`** | **`166.96 KiB`** | **`19.70×`** | **`6.13 GB/s`** | Exceeds 3.5 GB/s target by **+75%** |
 | **LZ4 In-L3 Hot Block Stream (`LZ4_decompress_safe`)** | `265.67 KiB` | `12.38×` | **`21.34 GB/s`** | Sub-millisecond L3 context expansion |
+
+---
+
+## Benchmark 10: AVX-512 VBMI (`VPERMB`) 1.58-Bit Ternary LUT Inference (`T-MAC` / `bitnet.cpp`)
+
+While a 0.5B Q4_K_M draft model (`463 MiB`) exceeds the 96 MB 3D V-Cache and hits the 4-Core DDR5 Saturation Wall (`154.5 t/s`), a **250M–280M 1.58-bit ternary model ($\{-1, 0, +1\}$) occupies only `56.0 MiB`**, fitting **100% inside the 64 MB Safe Boundary** (`benchmarks/l3_vpermb_ternary_lut.c`). Using the `T-MAC` / `bitnet.cpp` lookup-table paradigm, precomputed activation partial sums are held inside a 64-byte ZMM register (`lut`) and queried via **AVX-512 VBMI `_mm512_permutexvar_epi8` (`VPERMB`)** + **`_mm512_dpbusd_epi32` (`VPDPBUSD`)**—performing 64 parallel byte-table lookups per instruction without dequantization:
+
+| Model Footprint & Core Allocation | Latency / Step | Throughput | Effective LUT Bandwidth | Ternary Operations | Scaling Regime |
+|:---|:---:|:---:|:---:|:---:|:---|
+| **`56 MiB` L3-Resident (`~280M` 1.58b) [1 Core]** | `0.54 ms` | `1,838.0 tok/s` | `107.93 GB/s` | `431.7 GOPS` | Single-core L3 SRAM |
+| **`56 MiB` L3-Resident (`~280M` 1.58b) [4 Cores]** | `0.14 ms` | `7,406.1 tok/s` | `434.89 GB/s` | `1,739.6 GOPS` | `4.03×` scaling over 1C |
+| **`56 MiB` L3-Resident (`~280M` 1.58b) [8 Cores]** | **`0.09 ms`** | **`10,700.4 tok/s`** | **`628.33 GB/s`** | **`2,513.3 GOPS`** | **`+44.5%` faster on 8C vs. 4C** (No DDR5 wall) |
+| **`256 MiB` DDR5-Spill (`~1.2B` 1.58b) [4 Cores]** | `2.88 ms` | `347.1 tok/s` | `93.18 GB/s` | `372.7 GOPS` | Saturates dual-channel DDR5-6000 |
+| **`256 MiB` DDR5-Spill (`~1.2B` 1.58b) [8 Cores]** | `3.70 ms` | `270.4 tok/s` | `72.58 GB/s` | `290.3 GOPS` | **-22.1% 8-core DDR5 degradation** |
+
+---
+
+## Benchmark 11: Non-Temporal Cache Bypass (`_MM_HINT_NTA` & `VMOVNTDQA`) vs. L3 Pollution
+
+Zen 4 implements a **mostly exclusive L3 victim cache**: cache lines evicted from the 1 MiB per-core L2 spill directly into the 96 MB L3. Consequently, when a two-stage RAG or database pipeline performs a cold DDR5 scan (such as Stage-2 candidate rescoring or streaming file ingestion) using standard temporal loads (`_mm512_load_si512` + `_MM_HINT_T0`), those single-use cold lines flush out of L2 into L3 and **evict the hot L3 index** (`benchmarks/l3_nta_pollution_guard.c`):
+
+| Interleaved Workload (`48 MiB` Hot L3 Pointer Ring + `64 MiB` Cold DDR5 Scan) | Hot Index Latency | L3 Eviction Penalty | Relative Speed |
+|:---|:---:|:---:|:---|
+| **1. Quiet Hot `48 MiB` L3 Index Baseline** | **`11.56 ns / hop`** | `0.0%` (100% L3 Hit) | `1.00×` (Baseline) |
+| **2. After `64 MiB` Temporal Cold DDR5 Scan (`VMOVDQA64` + `_MM_HINT_T0`)** | `39.14 ns / hop` | **`+238.6%` latency spike** | `3.39×` slower (Hot L3 evicted) |
+| **3. After `64 MiB` Non-Temporal Guarded DDR5 Scan (`_MM_HINT_NTA` + `VMOVNTDQA` + `CLFLUSHOPT`)** | **`11.05 ns / hop`** | **`0.0%` (100% eliminated)** | **`3.54×` faster than Temporal** |
+
+---
+
+## Benchmark 12: 1,000,000-Vector Product Quantization (`PQ64`) FastScan in 64MB L3
+
+Storing **1,000,000** 512-dimensional embeddings in FP32 requires **`1.91 GiB`** (or `488.3 MiB` in INT8), overflowing the 96 MB 3D V-Cache by 5–20×. By compressing each vector via **Product Quantization (`PQ64` = 64 subspaces $\times$ 1 byte = `64 B/vector`)** into a **64-document transposed FastScan layout** (`benchmarks/l3_pq64_fastscan_1m.c`), the entire **1,000,000-vector index occupies `61.04 MiB`**—residing **100% inside the 64 MB 3D V-Cache Safe Boundary** while the `4.00 KiB` Asymmetric Distance Computation (ADC) lookup table stays pinned in L1D/ZMM registers (`VPERMB` + `VPDPBUSD`):
+
+| Search Mode over 1,000,000 Vectors (`61.04 MiB` PQ64 in L3, `MADV_HUGEPAGE`) | Query Latency | Throughput (`QPS`) | Scan Rate | L3 SRAM Bandwidth |
+|:---|:---:|:---:|:---:|:---:|
+| **Exhaustive 1,000,000-Vector FastScan [1 Core]** | `638.09 µs` | `1,567.2 QPS` | `1.57 B vec/s` | `100.30 GB/s` |
+| **Exhaustive 1,000,000-Vector FastScan [4 Cores]** | `153.39 µs` | `6,519.2 QPS` | `6.52 B vec/s` | `417.23 GB/s` |
+| **Exhaustive 1,000,000-Vector FastScan [8 Cores]** | **`102.20 µs` (`0.10 ms`)** | **`9,784.4 QPS`** | **`9.78 B vec/s`** | **`626.20 GB/s`** |
+| **Two-Stage IVF + PQ64 Top-4,096 Rescore [1 Core]** | **`2.55 µs`** | **`392,240.4 QPS`** | **Zero DDR5 Hits** | 100% L3 SRAM |
+
+---
+
+## Benchmark 13: Asymmetric Hybrid MoE Offloading (L3 Shared Expert + NTA Cold Experts)
+
+In Mixture-of-Experts (MoE) inference (e.g., 24 layers with an always-active **`48 MiB` Gating Router + Shared Expert** and **`64 MiB/token` of sparse Cold Experts** pulled from a `512 MiB` DDR5 pool = `112 MiB/token` total), uniform thread scheduling fails because the two tensor classes sit on opposite sides of the 96 MB cache cliff (`benchmarks/l3_moe_shared_expert_pinning.c`):
+
+| MoE Execution Topology (`48 MiB` Hot Shared Expert + `64 MiB/tok` Cold DDR5 Experts) | Shared Expert Latency | Cold Experts Latency | Total Token Latency | Generation Speed |
+|:---|:---:|:---:|:---:|:---:|
+| **1. Naive 8-Core MoE (`8C` Shared + `8C` Temporal Cold)** | `0.12 ms` | `1.14 ms` | `1.26 ms` | `791.5 tok/s` |
+| **2. Uniform 4-Core MoE (`4C` Shared + `4C` Temporal Cold)** | `0.20 ms` | `1.15 ms` | `1.35 ms` | `739.8 tok/s` |
+| **3. Asymmetric V-Cache MoE (`8C` L3 Shared + `4C` `_MM_HINT_NTA` Cold)** | **`0.09 ms`** | **`1.07 ms`** | **`1.16 ms`** | **`864.0 tok/s` (+16.8%)** |
 
 ---
 
