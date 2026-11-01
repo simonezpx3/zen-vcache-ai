@@ -24,6 +24,7 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 | **[1.58-Bit Ternary LUT Inference](#benchmark-10-avx-512-vbmi-vpermb-158-bit-ternary-lut-inference-t-mac--bitnetcpp)** (`VPERMB` in L3) | `270.4–347.1 t/s` (`256 MiB` DDR5 spill) | **`10,700.4 t/s`** (`56 MiB` ~280M in L3, 8C) | **`628.3 GB/s` L3 LUT read**, **`2.51 TOPS`**, linear 8C scaling |
 | **[1,000,000-Vector PQ64 FastScan](#benchmark-12-1000000-vector-product-quantization-pq64-fastscan-in-64mb-l3)** (`VPERMB` + `VPDPBUSD`) | `1.91 GiB` FP32 in DDR5 | **`102.2 µs`** full 1M scan / **`2.55 µs`** IVF (`61 MiB` L3) | **`9.78B vec/s` (`626.2 GB/s`)**, **`392.2k QPS`**, **0 DDR5 hits** |
 | **[Non-Temporal L3 Pollution Guard](#benchmark-11-non-temporal-cache-bypass-_mm_hint_nta--vmovntdqa-vs-l3-pollution)** (`_MM_HINT_NTA` + `VMOVNTDQA`) | `39.14 ns/hop` (+238.6% L3 eviction penalty) | **`11.05 ns/hop`** after `64 MiB` cold DDR5 scan | **`3.54×` faster**, **100% L3 eviction protection** |
+| **[Asymmetric Hybrid MoE Offload](#benchmark-13-asymmetric-hybrid-moe-offloading-l3-shared-expert--nta-cold-experts)** (`48 MiB` Shared + `64 MiB` Cold) | `739.8 t/s` (`1.35 ms`, Uniform 4C) | **`864.0 t/s`** (`1.16 ms`, `8C` L3 + `4C` NTA) | **`+16.8%` MoE throughput**, **`0.09 ms`** Shared Expert |
 | **[Cross-Process IPC](#benchmark-7-nanosecond-l3-lockless-ring-buffer-ipc-devshm)** (`/dev/shm` lockless ring) | `2,465 ns` (`AF_UNIX` socket) | **`2.48 ns`** (pipe) / **`34.7 ns`** (RTT/2) | **`993×` lower latency**, **`402.9M msg/s`**, `SIGKILL`-safe |
 | **[HNSW Vector Search](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)** (100k vectors, 512-dim) | `36,928 QPS` (`201 MiB` FP32 in DDR5) | **`62,733 QPS`** (`31 MiB` INT8 sketch in L3) | **`+69.9%` throughput**, **`-41.1%` latency** at `1.0000` Recall |
 | **[Two-Stage Vector RAG & Router](#benchmark-5-production-two-stage-l3-vector-rag--avx-512-simd-acceleration)** (`AVX-512`) | GPU / DRAM FP32 embeddings | **`202 µs`** 1-bit scan / **`72 µs`** VNNI router | **Sub-ms CPU RAG & routing**, **`0 MiB` GPU VRAM** |
@@ -31,10 +32,11 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 | **[SQLite Zero-Copy & 2MB HugePages](#benchmark-2-sqlite-l3-memory-mapped-residency)** | `60.8 ns` DDR5, `899k` dTLB misses | **`11.0 ns` L3 mmap**, **`17k` dTLB misses** | **`-98.1%` dTLB misses**, **`-65.5%` kernel CPU time** |
 
 > [!IMPORTANT]
-> **Three Counter-Intuitive Hardware Laws Verified on Zen 4 3D V-Cache:**
-> 1. **The 64 MB Safe Boundary (Not 96 MB):** Between **8 MB and 64 MB**, random access latency stays completely flat at **10.6–11.3 ns** (whereas standard 32 MB Zen 4 chips spill to >40 ns DRAM past 32 MB). Above 64 MB, OS and thread stack contention begins, pushing 96 MB latency to **29.6 ns**.
-> 2. **The 4-Core DDR5 Saturation Law:** Once a CPU model or buffer exceeds the 96 MB L3 ceiling and spills into DDR5 (e.g., a 463 MiB 0.5B GGUF draft model), **4 physical cores (`154.5 t/s`) outperform all 8 cores (`131.2 t/s`) by +15.1%** with **13.4× lower latency jitter**—4 Zen 4 cores completely saturate dual-channel DDR5-6000 bandwidth, and adding more cores triggers memory-controller bank thrashing.
-> 3. **Zero-VRAM Speculative Co-Existence:** On VRAM-constrained 8 GB GPUs (RTX 3070), replace neural draft models with an **L3-resident n-gram lookup state machine (`< 12 MiB` L3, `0 MiB` VRAM)** pinned to Cores 4–7 to achieve **1.35×–10.80×** generation speedup without touching GPU memory or the DDR5 bus.
+> **Four Counter-Intuitive Hardware Laws Verified on Zen 4 3D V-Cache:**
+> 1. **The 64 MB Safe Boundary (Not 96 MB):** Between **8 MB and 64 MB**, random access latency stays completely flat at **10.6–11.3 ns** (`628.3 GB/s` sustained AVX-512 `VPERMB` read bandwidth across 8 cores, whereas standard 32 MB Zen 4 chips spill to >40 ns DRAM past 32 MB). Above 64 MB, OS and thread stack contention begins, pushing 96 MB latency to **29.6 ns**.
+> 2. **The 4-Core DDR5 Saturation Law:** Once a CPU model or buffer exceeds the 96 MB L3 ceiling and spills into DDR5 (e.g., a 463 MiB 0.5B GGUF draft model or 256 MiB ternary LUT model), **4 physical cores outperform all 8 cores by +15.1% to +28.4%** with **13.4× lower latency jitter**—4 Zen 4 cores completely saturate dual-channel DDR5-6000 bandwidth, and adding more cores triggers memory-controller bank thrashing.
+> 3. **Exclusive Victim-Cache Eviction & The `_MM_HINT_NTA` Guard:** Because Zen 4's 96 MB L3 is a mostly exclusive victim cache filled by L2 evictions, streaming 64 MiB of cold DDR5 data via standard temporal loads flushes L2 into L3 and **degrades hot L3 index latency by +238.6%** (`11.56 ns` $\rightarrow$ `39.14 ns/hop`). Issuing `_mm_prefetch(..., _MM_HINT_NTA)` + `_mm512_stream_load_si512` (`VMOVNTDQA`) **eliminates 100% of L3 pollution** (`11.05 ns/hop`).
+> 4. **Zero-VRAM Speculative Co-Existence:** On VRAM-constrained GPUs, offloading speculative drafting (`<12 MiB` n-gram or `56 MiB` 1.58-bit `VPERMB` LUT), `PQ64` 1M-vector RAG (`61 MiB`), and MoE Shared Experts (`48 MiB`) into 3D V-Cache delivers **1.35×–10.80×** generation speedup with **`0 MiB` extra GPU VRAM**.
 
 ### Test Rig & Environment Specifications
 
@@ -43,10 +45,10 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 | **CPU** | AMD Ryzen 7 7800X3D (Zen 4, 8 Cores / 16 Threads) | Single monolithic CCD, 4.2 GHz base / 5.0 GHz boost |
 | **L1 Cache** | 32 KiB L1D + 32 KiB L1I per core (512 KiB total) | ~0.8–1.0 ns access latency |
 | **L2 Cache** | 1024 KiB (1 MiB) per core (8 MiB total) | ~3.0–3.2 ns access latency |
-| **L3 Cache** | **96 MiB Unified SRAM** (32 MiB base + 64 MiB 3D V-Cache) | ~10.6–11.4 ns sustained latency (~1.3 TB/s bandwidth) |
-| **System Memory** | 32 GiB Dual-Channel DDR5-6000 CL30 (EXPO enabled) | ~60–75 ns random access floor |
+| **L3 Cache** | **96 MiB Unified SRAM** (32 MiB base + 64 MiB 3D V-Cache) | ~10.6–11.4 ns sustained latency (`628.3 GB/s` VPERMB / ~1.3 TB/s peak) |
+| **System Memory** | 32 GiB Dual-Channel DDR5-6000 CL30 (EXPO enabled) | ~60–75 ns random access floor (`~60–93 GB/s` sustained) |
 | **Host Operating System** | Arch Linux (Kernel 6.14.x, x86-64-v3) | Linux PMU subsystem (`perf`, `cgroups v2`) |
-| **Compiler / Toolchain** | GCC 14.x (`-O3 -march=native`), Python 3.12+ | AVX-512 VNNI SIMD vectorization enabled |
+| **Compiler / Toolchain** | GCC 14.x (`-O3 -march=native -fopenmp`), Python 3.12+ | AVX-512 `VNNI`, `VBMI` (`VPERMB`), `VPOPCNTDQ`, `BW` enabled |
 
 ---
 
@@ -67,12 +69,16 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 - [Benchmark 12: 1,000,000-Vector Product Quantization (PQ64) FastScan in 64MB L3](#benchmark-12-1000000-vector-product-quantization-pq64-fastscan-in-64mb-l3)
 - [Benchmark 13: Asymmetric Hybrid MoE Offloading (L3 Shared Expert + NTA Cold Experts)](#benchmark-13-asymmetric-hybrid-moe-offloading-l3-shared-expert--nta-cold-experts)
 - [Practical Applications & Architecture Patterns](#practical-applications--architecture-patterns)
-- [Production Cheat Sheet: 7 Golden Rules for Systems Engineers](#production-cheat-sheet-7-golden-rules-for-systems-engineers)
-- [Repository Structure & Tooling](#repository-structure--tooling)
+  - [The 3-Tier Local AI Memory Pyramid (8 GB vs. 24 GB GPU Scaling Blueprint)](#the-3-tier-local-ai-memory-pyramid-turning-3d-v-cache-into-a-628-gbs-co-processor)
+- [Production Cheat Sheet: 9 Golden Rules for Systems Engineers](#production-cheat-sheet-9-golden-rules-for-systems-engineers)
 - [External Validation & Microarchitectural Corroboration](#external-validation--microarchitectural-corroboration)
+  - [Industry SOTA Comparison Matrix](#4-industry-sota-comparison-matrix-measured-l3-kernels-vs-published-baselines)
 - [Production Gotchas & Engineering Trade-offs](#production-gotchas--engineering-trade-offs)
+- [Repository Structure & Tooling](#repository-structure--tooling)
 - [Reproducing the Benchmarks](#reproducing-the-benchmarks)
 - [References & Prior Art](#references--prior-art)
+- [Commercial Inquiries, Custom Engineering & Support](#commercial-inquiries-custom-engineering--support)
+- [License & Trademark Disclaimer](#license--trademark-disclaimer)
 
 ---
 
@@ -510,9 +516,9 @@ When capturing high-volume CLI sandbox outputs in `/dev/shm` or indexing million
 
 ---
 
-## Production Cheat Sheet: 7 Golden Rules for Systems Engineers
+## Production Cheat Sheet: 9 Golden Rules for Systems Engineers
 
-To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D processors in production, enforce these seven principles:
+To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D processors in production, enforce these nine principles:
 
 1. **The Rule of 64MB (Working Set Sizing)**:
    Never size active datasets to the nominal 96MB hardware ceiling. Keep hot working sets, model weights, and SQLite mmap buffers **strictly under 64 MB**. This leaves 32MB headroom for operating system buffers, thread stacks, dynamic heap allocations, and kernel interrupts without triggering pseudo-LRU cache line evictions.
@@ -527,13 +533,19 @@ To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D proc
    When combining background compute or model generation with low-latency search, partition the 8 physical cores: bind database and vector search workers to Cores 0–3 and heavy background threads to Cores 4–7. This preserves sub-millisecond p99 latency (759 µs vs. 790 µs unpinned) and reduces latency jitter by **12.2%** even under heavy DDR5 memory bus flooding.
 
 5. **The 4-Core DDR5 Saturation Law (For Weights Spilling Out of L3)**:
-   Whenever a CPU model or buffer exceeds the 96 MB 3D V-Cache (e.g., a 463 MiB 0.5B GGUF model), **restrict execution strictly to 4 physical cores (`-t 4`)**. Dual-channel DDR5-6000 bandwidth (~75 GB/s) saturates completely at 4 Zen 4 cores (`154.53 t/s`); scaling to 8 cores causes memory-controller bank thrashing, **reducing throughput by -15.1%** (`131.17 t/s`) and increasing latency jitter by **13.4×**.
+   Whenever a CPU model or buffer exceeds the 96 MB 3D V-Cache (e.g., a 463 MiB 0.5B GGUF model or 256 MiB ternary LUT model), **restrict execution strictly to 4 physical cores (`-t 4`)**. Dual-channel DDR5-6000 bandwidth (~75–93 GB/s) saturates completely at 4 Zen 4 cores (`154.53 t/s`); scaling to 8 cores causes memory-controller bank thrashing, **reducing throughput by -15.1% to -22.1%** and increasing latency jitter by **13.4×**.
 
-6. **Two-Tier Graph Separation (Hot L3 Sketch vs. Cold DRAM Payload)**:
-   Never interleave full `FP32` vectors (`2,048 B`) inside HNSW graph nodes. Keep the Layer-0 adjacency list (`64 B`) and compact `1-bit` / `INT8` quantized sketches inside a dedicated L3-resident array (`<= 320 B/node`), and touch DRAM `FP32` / `INT8` payloads only during final Top-K rescoring (**+69.9% QPS** at **1.0000 Recall@10**).
+6. **Two-Tier Graph & PQ64 Separation (Hot L3 Sketch vs. Cold DRAM Payload)**:
+   Never interleave full `FP32` vectors (`2,048 B`) inside HNSW graph nodes or exhaustive scan arrays. Keep Layer-0 adjacency lists (`64 B`), `INT8` sketches (`320 B/node`), or transposed `PQ64` codes (`61.04 MiB` for 1M vectors) inside a dedicated L3-resident array, and touch DRAM payloads only during final Top-K rescoring.
 
 7. **Pin 112 KiB Zstd Dictionaries in L2/L3 for Sub-Kilobyte Streams**:
    For JSONL telemetry, agent transcripts, and `/dev/shm` IPC payloads under 1 KB, pre-train a **112 KiB Zstandard dictionary (`ZSTD_CDict` / `ZSTD_DDict`)**. Because 112 KiB fits entirely inside the 1 MiB per-core L2 and 96 MB L3 cache, dictionary lookups incur zero DRAM traffic while boosting compression ratio by **7.12×** and decompression throughput to **2.31–6.13 GB/s**.
+
+8. **Guard the Exclusive L3 Victim Cache with Non-Temporal Loads (`_MM_HINT_NTA` + `VMOVNTDQA`)**:
+   Because Zen 4's L3 is a mostly exclusive victim cache populated by L2 evictions, streaming cold DDR5 data (e.g., Stage-2 DRAM rescoring or sparse cold MoE experts) via temporal loads flushes L2 into L3 and evicts hot L3 tables (**+238.6% latency spike**). Always prefetch cold DRAM streams with `_mm_prefetch(..., _MM_HINT_NTA)` and load 64-byte aligned blocks via `_mm512_stream_load_si512` (`VMOVNTDQA`) to preserve **100% L3 residency**.
+
+9. **Exploit 8-Core In-Register `VPERMB` LUTs & Asymmetric MoE Thread Pinning**:
+   When model weights (`<= 56 MiB` 1.58-bit ternary) or `PQ64` tables (`<= 61 MiB`) fit inside the 64 MB L3 Safe Boundary, keep 64-byte activation lookup tables inside ZMM registers (`_mm512_permutexvar_epi8` / `VPERMB`) and scale across **all 8 cores (`628.3 GB/s`)**. For Hybrid MoE inference, combine **8 cores** on the L3-resident Shared Expert (`<= 48 MiB`) with **4 cores + `_MM_HINT_NTA`** on DDR5-bound Cold Experts (**+16.8% token throughput**).
 
 ---
 
@@ -586,33 +598,47 @@ When designing software around L3 cache residency, several operational trade-off
 ```
 .
 ├── benchmarks/
-│   ├── cache_cliff.c              # Pointer-chasing cyclic permutation benchmark (8MB–256MB)
-│   ├── contention_benchmark.py    # DDR5 bus contention stress test with core pinning
-│   ├── hugepages_test.c           # 2MB HugePages vs standard 4KB paging benchmark
-│   ├── l3_hnsw_two_tier.c         # Two-Tier L3-resident HNSW graph vs monolithic DRAM HNSW
-│   ├── l3_lockless_ipc.c          # Nanosecond /dev/shm lockless ring-buffer IPC benchmark
-│   ├── l3_zstd_dict_stream.c      # In-L3 112 KiB Zstd dictionary & 21 GB/s LZ4 stream test
-│   ├── simd_l3_rag.c              # AVX-512 VPOPCNTDQ (Hamming) & VNNI (INT8) standalone test
-│   └── sqlite_l3_mmap.py          # SQLite FTS5 mmap vs page cache comparison
+│   ├── cache_cliff.c                  # Benchmark 1: Pointer-chasing cyclic permutation (8MB–256MB)
+│   ├── sqlite_l3_mmap.py              # Benchmark 2: SQLite FTS5 zero-copy mmap vs page cache
+│   ├── hugepages_test.c               # Benchmark 3: 2MB HugePages vs standard 4KB paging
+│   ├── contention_benchmark.py        # Benchmark 4: DDR5 bus flood stress test with core pinning
+│   ├── simd_l3_rag.c                  # Benchmark 5: AVX-512 VPOPCNTDQ (Hamming) & VNNI (INT8) RAG
+│   ├── l3_lockless_ipc.c              # Benchmark 7: Nanosecond /dev/shm lockless ring-buffer IPC
+│   ├── l3_hnsw_two_tier.c             # Benchmark 8: Two-Tier L3-resident HNSW graph vs DRAM HNSW
+│   ├── l3_zstd_dict_stream.c          # Benchmark 9: In-L3 112 KiB Zstd dictionary & 21 GB/s LZ4
+│   ├── l3_vpermb_ternary_lut.c        # Benchmark 10: AVX-512 VBMI (VPERMB) 1.58-bit ternary LUT
+│   ├── l3_nta_pollution_guard.c       # Benchmark 11: Non-Temporal (_MM_HINT_NTA/VMOVNTDQA) guard
+│   ├── l3_pq64_fastscan_1m.c          # Benchmark 12: 1,000,000-vector PQ64 FastScan in 64MB L3
+│   └── l3_moe_shared_expert_pinning.c # Benchmark 13: Asymmetric Hybrid MoE L3 Shared + NTA Cold
 ├── examples/
-│   ├── l3_ipc.c                   # Production /dev/shm lockless ring-buffer C shared library
-│   ├── l3_ipc_bus.py              # Python ctypes wrapper for nanosecond L3 IPC telemetry
-│   ├── l3_vector_kernel.c         # Production Two-Tier L3 HNSW & AVX-512 C shared library
-│   └── l3_zstd_stream.py          # Python ctypes libzstd.so.1 L3 dictionary stream wrapper
+│   ├── l3_ipc.c                       # Production /dev/shm lockless ring-buffer C shared library
+│   ├── l3_ipc_bus.py                  # Python ctypes wrapper for nanosecond L3 IPC telemetry
+│   ├── l3_vector_kernel.c             # Production Two-Tier L3 HNSW + NTA AVX-512 C shared library
+│   └── l3_zstd_stream.py              # Python ctypes libzstd.so.1 L3 dictionary stream wrapper
 ├── results/
-│   ├── baseline_probe_results.json # Hardware PMU flags and baseline query probe
-│   ├── cache_cliff_run.txt        # Raw latency numbers from 8MB to 256MB
-│   ├── contention_benchmark_results.json # Tail latency and jitter numbers under bus flood
-│   ├── l3_hnsw_two_tier_run.txt   # Two-tier L3 HNSW QPS and Recall@10 telemetry
-│   ├── l3_lockless_ipc_run.txt    # Cross-core /dev/shm lockless IPC latency & SIGKILL audit
-│   ├── l3_zstd_dict_stream_run.txt # Zstd dictionary and LZ4 in-L3 throughput logs
-│   ├── perf_stat_cache_cliff.txt  # Linux perf stat PMU event logs
-│   └── speculative_drafting_run.txt # Hybrid GPU + L3 speculative decoding & 4-core DDR5 saturation
+│   ├── baseline_probe_results.json    # Hardware PMU flags and baseline query probe
+│   ├── cache_cliff_run.txt            # Raw pointer-chasing latency numbers (8MB to 256MB)
+│   ├── contention_benchmark_results.json # Tail latency and jitter telemetry under bus flood
+│   ├── contention_run.txt             # Raw contention benchmark stdout log
+│   ├── hugepages_run.txt              # 2MB HugePages vs 4KB paging benchmark log
+│   ├── l3_hnsw_two_tier_run.txt       # Two-tier L3 HNSW QPS and Recall@10 telemetry
+│   ├── l3_lockless_ipc_run.txt        # Cross-core /dev/shm lockless IPC latency & SIGKILL audit
+│   ├── l3_moe_shared_expert_run.txt   # Asymmetric Hybrid MoE (8C L3 + 4C NTA) throughput log
+│   ├── l3_nta_pollution_guard_run.txt # Non-Temporal guard vs temporal L3 eviction log
+│   ├── l3_pq64_fastscan_1m_run.txt    # 1M-vector PQ64 FastScan & IVF QPS telemetry
+│   ├── l3_vpermb_ternary_lut_run.txt  # AVX-512 VPERMB 1.58-bit ternary LUT scaling log
+│   ├── l3_zstd_dict_stream_run.txt    # Zstd 112 KiB dictionary and LZ4 in-L3 throughput log
+│   ├── perf_stat_cache_cliff.txt      # Linux perf stat PMU hardware counter logs
+│   ├── simd_l3_rag_run.txt            # AVX-512 VPOPCNTDQ & VNNI micro-AI benchmark log
+│   ├── speculative_drafting_run.txt   # Hybrid GPU + L3 speculative decoding & 4-core DDR5 law
+│   └── sqlite_mmap_run.txt            # SQLite zero-copy mmap benchmark log
 ├── tools/
-│   └── vcache-run                 # Unprivileged core affinity & jemalloc wrapper
-├── reproduce.sh                   # Automated build & benchmark runner (runs all 8 benchmarks)
-├── LICENSE                        # MIT License
-└── README.md                      # Comprehensive microarchitectural report
+│   └── vcache-run                     # Unprivileged core affinity, jemalloc & hugetlb wrapper
+├── reproduce.sh                       # Automated build & benchmark runner (12 steps, all suites)
+├── CITATION.cff                       # Optional academic/research citation metadata
+├── LICENSE                            # Apache License 2.0
+├── NOTICE                             # Apache 2.0 attribution & copyright notice
+└── README.md                          # Comprehensive microarchitectural report
 ```
 
 ### The `vcache-run` Tool
@@ -631,7 +657,8 @@ This repository includes `tools/vcache-run`, an unprivileged CLI wrapper that is
 
 ### Prerequisites
 - Linux running on AMD Zen 4/5 X3D processor (e.g., Ryzen 7 7800X3D, 9800X3D).
-- `gcc` with AVX-512 support (`-mavx512f -mavx512vpopcntdq -mavx512vnni -mavx512bw -march=native`).
+- `gcc` with AVX-512 and OpenMP support (`-O3 -march=native -fopenmp -mavx512f -mavx512vpopcntdq -mavx512vnni -mavx512vbmi -mavx512bw`).
+- System compression headers/libraries: `zstd` (`libzstd`) and `lz4` (`liblz4`) for Benchmark 9.
 - Python 3.8+ with `sqlite3` and `numpy`.
 - `perf` (Linux tools) for hardware PMU telemetry.
 
@@ -652,6 +679,8 @@ chmod +x reproduce.sh
 3. **Coleman, B., Segarra, S., Shrivastava, A., Smola, A.** — [Graph Reordering for Cache-Efficient Near Neighbor Search](https://arxiv.org/abs/2104.03221) (NeurIPS / arXiv:2104.03221; formal analysis of pointer chasing, memory hierarchy stalls, and cache hit maximization in graph-based ANN algorithms like HNSW).
 4. **Qdrant Vector Database Research** — [Immutable Data Structures in Qdrant](https://qdrant.tech/articles/immutable-data-structures/) (Low-level performance analysis, CPU cache misses, and memory alignment in vector search).
 5. **AMD Zen 4 Microarchitecture & Optimization** — [Wikipedia: Zen 4 Microarchitecture](https://en.wikipedia.org/wiki/Zen_4) (Hardware breakdown of Zen 4 core pipeline, unified L3 cache hierarchy, and dual-pumped AVX-512 VNNI execution; cross-referencing AMD Publication #57647).
+6. **Wei, J. et al. (Microsoft Research)** — [T-MAC: CPU Renaissance via Table Lookup for Low-Bit LLM Deployment on Edge](https://arxiv.org/abs/2407.00088) (EuroSys / arXiv:2407.00088; LUT-based low-bit and 1.58-bit ternary BitNet inference using SIMD byte permutations without dequantization).
+7. **André, F., Kermarrec, A.-M., Le Scouarnec, N.** — [Cache Locality Is Not Enough: High-Performance Nearest Neighbor Search with Product Quantization Fast Scan](https://arxiv.org/abs/1512.01920) (VLDB / Meta Faiss `IndexPQFastScan`; transposed SIMD register lookup tables for sub-millisecond Product Quantization scans).
 
 ---
 

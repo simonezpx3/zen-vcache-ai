@@ -11,19 +11,19 @@ echo "===================================================================="
 echo " AMD Ryzen 7 7800X3D Hardware Cache Cliff & L3 Benchmark Suite"
 echo "===================================================================="
 
-echo "Step 1/8 // Compiling Cache Cliff Pointer-Chasing Benchmark..."
+echo "Step 1/12 // Compiling Cache Cliff Pointer-Chasing Benchmark..."
 gcc -O3 -march=native "${BENCHMARK_DIR}/cache_cliff.c" -o "${BENCHMARK_DIR}/cache_cliff" -lm
 
-echo "Step 2/8 // Compiling HugePages vs Standard Paging Benchmark..."
+echo "Step 2/12 // Compiling HugePages vs Standard Paging Benchmark..."
 gcc -O3 -march=native "${BENCHMARK_DIR}/hugepages_test.c" -o "${BENCHMARK_DIR}/hugepages_test"
 
-echo "Step 3/8 // Compiling AVX-512 Micro-AI SIMD Benchmark..."
+echo "Step 3/12 // Compiling AVX-512 Micro-AI SIMD Benchmark..."
 gcc -O3 -march=native -mavx512f -mavx512vpopcntdq -mavx512vnni -mavx512bw "${BENCHMARK_DIR}/simd_l3_rag.c" -o "${BENCHMARK_DIR}/simd_l3_rag"
 
-echo "Step 4/8 // Compiling L3 Lockless Ring-Buffer IPC Benchmark..."
+echo "Step 4/12 // Compiling L3 Lockless Ring-Buffer IPC Benchmark..."
 gcc -O3 -march=native "${BENCHMARK_DIR}/l3_lockless_ipc.c" -o "${BENCHMARK_DIR}/l3_lockless_ipc" -lrt
 
-echo "Step 5/8 // Compiling Two-Tier L3 HNSW Vector Graph Benchmark..."
+echo "Step 5/12 // Compiling Two-Tier L3 HNSW Vector Graph Benchmark..."
 gcc -O3 -march=native -mavx512f -mavx512vnni -mavx512bw "${BENCHMARK_DIR}/l3_hnsw_two_tier.c" -o "${BENCHMARK_DIR}/l3_hnsw_two_tier" -lm
 
 echo "Step 6/12 // Compiling In-L3 Zstandard Dictionary & LZ4 Stream Benchmark..."
