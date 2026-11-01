@@ -27,7 +27,7 @@
 #define PQ_M          64ULL
 #define DOC_BATCH     64ULL
 #define NUM_BLOCKS    (NUM_DOCS / DOC_BATCH)
-#define SEED_DNA      0x732641ULL
+#define PRNG_INIT_STATE 7546433ULL
 
 static inline double get_time_sec(void) {
     struct timespec ts;
@@ -134,7 +134,7 @@ int main(void) {
     }
     madvise(pq_blocks, index_bytes, MADV_HUGEPAGE);
 
-    uint64_t rng = SEED_DNA;
+    uint64_t rng = PRNG_INIT_STATE;
     for (size_t i = 0; i < index_bytes; i += 64) {
         rng = rng * 6364136223846793005ULL + 1442695040888963407ULL;
         pq_blocks[i] = (uint8_t)(rng & 0x3F);

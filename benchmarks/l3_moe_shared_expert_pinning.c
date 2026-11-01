@@ -34,7 +34,7 @@
 #define ACTIVE_COLD_MIB 64ULL
 #define NUM_SLICES      (COLD_POOL_MIB / ACTIVE_COLD_MIB)
 #define TOKENS_BENCH    40
-#define SEED_DNA        0x732641ULL
+#define PRNG_INIT_STATE 7546433ULL
 
 static inline double get_time_sec(void) {
     struct timespec ts;
@@ -50,7 +50,7 @@ static uint8_t* alloc_aligned_mib(size_t mib) {
         exit(1);
     }
     madvise(buf, bytes, MADV_HUGEPAGE);
-    uint64_t rng = SEED_DNA ^ mib;
+    uint64_t rng = PRNG_INIT_STATE ^ mib;
     for (size_t i = 0; i < bytes; i += 64) {
         rng = rng * 6364136223846793005ULL + 1442695040888963407ULL;
         buf[i] = (uint8_t)(rng & 0x3F);

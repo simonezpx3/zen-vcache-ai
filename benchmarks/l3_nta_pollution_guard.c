@@ -29,7 +29,7 @@
 #define SWEEP_MIB     64ULL
 #define HOPS_PER_QUERY 200000
 #define ROUNDS 25
-#define SEED_DNA 0x732641ULL
+#define PRNG_INIT_STATE 7546433ULL
 
 static inline uint64_t get_ns(void) {
     struct timespec ts;
@@ -54,7 +54,7 @@ static Node* build_hot_ring(size_t num_nodes) {
     uint32_t* perm = malloc(num_nodes * sizeof(uint32_t));
     for (size_t i = 0; i < num_nodes; i++) perm[i] = (uint32_t)i;
 
-    uint64_t rng = SEED_DNA;
+    uint64_t rng = PRNG_INIT_STATE;
     for (size_t i = num_nodes - 1; i > 0; i--) {
         rng = rng * 6364136223846793005ULL + 1442695040888963407ULL;
         size_t j = (size_t)(rng % (i + 1));

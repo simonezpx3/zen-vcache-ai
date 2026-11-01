@@ -4,7 +4,7 @@
 ![Architecture: Zen 4 (8C/16T)](https://img.shields.io/badge/Architecture-Zen_4_(8C%2F16T)-orange)
 ![L3 Cache: 96MB Unified](https://img.shields.io/badge/L3_Cache-96MB_Unified_SRAM-blue)
 ![OS: Linux 6.14](https://img.shields.io/badge/OS-Linux_6.14-yellow?logo=linux&logoColor=white)
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 
 Hardware PMU telemetry and benchmarks demonstrating low-latency memory residency on the AMD Ryzen 7 7800X3D (Zen 4, 8C/16T, 96MB unified L3 SRAM).
 
@@ -625,6 +625,35 @@ chmod +x reproduce.sh
 
 ---
 
-## License
+## Commercial Inquiries, Custom Engineering & Support
 
-MIT License. See [LICENSE](LICENSE) for details.
+> [!NOTE]
+> **Custom AVX-512 / 3D V-Cache Systems Engineering & Architecture Audits:**
+> Available for specialized low-latency performance consulting, custom SIMD kernel development (`AVX-512 VNNI` / `VBMI` / `VPOPCNTDQ`), HNSW / PQ vector engine tuning, and L3 cache residency architecture across AMD Zen 4/5 X3D and server EPYC Genoa-X / Turin-X platforms.
+> - **Contact / Commercial Licensing**: `arcicml@gmail.com`
+
+---
+
+## Citation
+
+If you reference these empirical findings, architectural laws (*The 64 MB Safe Boundary*, *The 4-Core DDR5 Saturation Law*, *Non-Temporal Exclusive L3 Victim Guard*), or SIMD kernels in academic papers, technical articles, or engineering documentation, please cite:
+
+```bibtex
+@software{simonezpx3_2026_vcache,
+  author       = {simonezpx3},
+  title        = {{Cache-Resident Working Sets: Exploiting Zen 4 96MB V-Cache for Sub-Millisecond SQLite \& Edge Micro-AI}},
+  year         = 2026,
+  month        = nov,
+  version      = {2.0.0},
+  url          = {https://github.com/simonezpx3/ryzen-7800x3d-vcache-benchmarks},
+  license      = {Apache-2.0}
+}
+```
+
+---
+
+## License & Trademark Disclaimer
+
+Copyright 2026 `simonezpx3`. Licensed under the **Apache License, Version 2.0** (see [LICENSE](LICENSE) and [NOTICE](NOTICE) for full terms and mandatory attribution requirements).
+
+*Disclaimer: AMD, Ryzen, Zen 4, EPYC, and 3D V-Cache are trademarks or registered trademarks of Advanced Micro Devices, Inc. This repository represents independent systems engineering research and is not affiliated with or endorsed by AMD.*

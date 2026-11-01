@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use these benchmarks, architectural laws, or AVX-512 kernels in your research or production systems, please cite this work as below."
+title: "Cache-Resident Working Sets: Exploiting Zen 4 96MB V-Cache for Sub-Millisecond SQLite & Edge Micro-AI"
+authors:
+  - alias: "simonezpx3"
+    name: "simonezpx3"
+date-released: 2026-11-01
+version: "2.0.0"
+license: Apache-2.0
+repository-code: "https://github.com/simonezpx3/ryzen-7800x3d-vcache-benchmarks"
+keywords:
+  - amd-3d-vcache
+  - ryzen-7800x3d
+  - zen4
+  - avx512
+  - vnni
+  - vpermb
+  - hnsw
+  - product-quantization
+  - speculative-decoding
+  - lockless-ipc

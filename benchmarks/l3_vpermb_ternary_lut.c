@@ -24,7 +24,7 @@
  *    the 4-Core DDR5 Saturation Law and reaches >400 GB/s effective LUT bandwidth.
  */
 
-#define SEED_DNA 0x732641ULL
+#define PRNG_INIT_STATE 7546433ULL
 
 static inline double get_time_sec(void) {
     struct timespec ts;
@@ -87,7 +87,7 @@ static uint8_t* alloc_huge_buffer(size_t bytes) {
         exit(1);
     }
     madvise(buf, bytes, MADV_HUGEPAGE);
-    uint64_t state = SEED_DNA;
+    uint64_t state = PRNG_INIT_STATE;
     for (size_t i = 0; i < bytes; i += 64) {
         state = state * 6364136223846793005ULL + 1442695040888963407ULL;
         buf[i] = (uint8_t)(state & 0x3F);
