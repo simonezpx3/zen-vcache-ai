@@ -102,30 +102,46 @@ zen4-3d-vcache-exploit/
 ├── bin/
 │   ├── vcache-run           # Core affinity and memory topology wrapper
 │   └── vcache-spec-bench    # Empirical benchmark harness
+├── src/vcache/
+│   ├── __init__.py          # Public Python package interface
+│   ├── benchmark.py         # Benchmark harness & multi-run engine
+│   ├── topology.py          # L3 cache sysfs inspector & affinity resolver
+│   └── vector.py            # AVX-512 ctypes bindings & vector benchmark
 ├── kernels/
 │   ├── l3_vector_kernel.c   # AVX-512 VPOPCNTDQ / VBMI L3 vector engine
 │   └── Makefile             # znver4 optimized compiler targets
+├── tests/
+│   ├── test_topology.py     # CPU topology & L3 sysfs unit tests
+│   └── test_benchmark.py    # Metric parsing & vector engine unit tests
+├── pyproject.toml
 ├── .gitignore
 ├── LICENSE
+├── NOTICE
 └── README.md
 ```
 
 ### Execution Commands
 
 ```bash
-# Execute complete benchmark suite
+# Execute complete speculative decoding benchmark suite
 ./bin/vcache-spec-bench --scenario all
 
-# Export raw metrics for telemetry ingestion
-./bin/vcache-spec-bench --scenario refactor --json
+# Export raw metrics for telemetry ingestion (JSON or CSV)
+./bin/vcache-spec-bench --scenario refactor --format json
+
+# Run in-L3 AVX-512 vector scan benchmark (10k, 100k, 500k vectors)
+PYTHONPATH=src python3 -m vcache.vector
+
+# Inspect CPU cache hierarchy and recommended pinning
+PYTHONPATH=src python3 -m vcache.topology
+
+# Run unit tests
+PYTHONPATH=src python3 -m unittest discover -s tests
 
 # Run pinned inference with huge page provisioning and jemalloc
 ./bin/vcache-run --profile infer -- llama-cli -m model.gguf -ngl 99 \
   --spec-type ngram-mod --spec-ngram-mod-n-min 2 --spec-ngram-mod-n-max 16 \
   --spec-draft-threads 4 --spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1 --spec-draft-ngl 0
-
-# Compile AVX-512 vector search kernel
-cd kernels && make
 ```
 
 ---

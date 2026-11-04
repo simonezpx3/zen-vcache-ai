@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zen4-vcache-ai"
+version = "1.1.0"
+description = "Zen 4 3D V-Cache microarchitectural AI exploitation and speculative drafting suite"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Simonez & Arci", email = "simonezpx3@gmail.com" }
+]
+keywords = ["vcache", "3d-vcache", "zen4", "speculative-decoding", "avx512", "llm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Hardware",
+]
+
+[project.scripts]
+vcache-spec-bench = "vcache.benchmark:main"
+vcache-vector-bench = "vcache.vector:main"
+vcache-topology = "vcache.topology:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
