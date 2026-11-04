@@ -1,0 +1,17 @@
+# Build artifacts
+*.so
+*.o
+*.a
+*.bin
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+
+# System / IDE
+.DS_Store
+*.swp
+*~
