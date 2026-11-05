@@ -98,6 +98,21 @@ Automated validation conducted via `vcache-spec-bench` using Qwen 2.5 Coder 7B I
 | **Repetitive Schema / DTO** | 14.2% | 0.99x | **76.8%** | 2.95 | **176.7 tok/s** | **2.19x** |
 | **Greenfield Algorithm Logic** | 3.8% | 0.99x | **71.5%** | 2.68 | **169.4 tok/s** | **2.11x** |
 
+### End-to-End `llama.cpp` SpecOPD L3 Greenfield Benchmark (`Cores 4-7`, RTX 3070 8GB)
+
+* **L3 Micro-Drafter:** `Qwen3-SpecOPD-12M (Q8_0)` — **10.35 MiB** resident L3 tensor footprint (**2,039.0 tok/s** standalone L3 SRAM throughput at `-ngl 0`, **0 MiB VRAM**).
+* **Universal Vocabulary Compatibility:** Shared 151,936-token Qwen3 vocabulary accelerates both `Qwen3-4B` and `Qwen3-8B` targets with deterministic PMU `perf_event_open` fallback to `ngram-mod`.
+
+| Target Model (GPU `-ngl 99`) | Speculation Mode (CPU `Cores 4-7`, `-ngld 0`) | Generation Throughput | Speedup | VRAM Delta |
+| :--- | :--- | :---: | :---: | :---: |
+| **Qwen3-8B (`Q4_K_M`)** | Baseline (`--spec-type none`) | 74.8 tok/s | 1.00x | 0 MiB |
+| **Qwen3-8B (`Q4_K_M`)** | Pure N-Gram (`--spec-type ngram-mod`) | 75.8 tok/s | 1.01x | 0 MiB |
+| **Qwen3-8B (`Q4_K_M`)** | **SpecOPD L3 Proposal-Tree (6-Node)** | **108.5 tok/s** | **1.45x** | **0 MiB** |
+| **Qwen3-8B (`Q4_K_M`)** | **SpecOPD L3 Proposal-Tree (12-Node)** | **235.5 tok/s** | **3.15x** | **0 MiB** |
+| **Qwen3-4B (`Q4_K_M`)** | Baseline (`--spec-type none`) | 121.7 tok/s | 1.00x | 0 MiB |
+| **Qwen3-4B (`Q4_K_M`)** | Pure N-Gram (`--spec-type ngram-mod`) | 121.4 tok/s | 0.99x | 0 MiB |
+| **Qwen3-4B (`Q4_K_M`)** | **SpecOPD L3 Proposal-Tree** | **163.2 tok/s** | **1.34x** | **0 MiB** |
+
 ### Prompt Processing Ingestion (Context Loading)
 * **Refactoring Scenarios:** Baseline `2,004.0 t/s` -> L3 Affinity `2,286.2 t/s` (**+14.1%**)
 * **Greenfield Scenarios:** Baseline `1,565.5 t/s` -> L3 Affinity `1,764.0 t/s` (**+12.7%**)
@@ -111,6 +126,7 @@ Automated validation conducted via `vcache-spec-bench` using Qwen 2.5 Coder 7B I
 ```
 zen4-3d-vcache-exploit/
 ├── bin/
+│   ├── vcache-distill-specopd   # Qwen3 12M INT8 (Q8_0) L3 micro-draft GGUF distiller
 │   ├── vcache-run               # Core affinity and memory topology wrapper
 │   └── vcache-spec-bench        # Empirical benchmark harness
 ├── src/vcache/
@@ -143,6 +159,9 @@ zen4-3d-vcache-exploit/
 # Export raw metrics for telemetry ingestion (JSON or CSV)
 ./bin/vcache-spec-bench --scenario refactor --format json
 
+# Distill 10.35 MiB Q8_0 L3-resident Qwen3 micro-draft GGUF model
+./bin/vcache-distill-specopd --teacher teacher_qwen3.gguf --output qwen3-specopd-12m-q8_0.gguf
+
 # Run in-L3 AVX-512 vector scan benchmark (10k, 100k, 500k vectors)
 PYTHONPATH=src python3 -m vcache.vector
 
@@ -152,10 +171,11 @@ PYTHONPATH=src python3 -m vcache.topology
 # Run unit tests
 PYTHONPATH=src python3 -m unittest discover -s tests
 
-# Run pinned inference with huge page provisioning and jemalloc
-./bin/vcache-run --profile infer -- llama-cli -m model.gguf -ngl 99 \
-  --spec-type ngram-mod --spec-ngram-mod-n-min 2 --spec-ngram-mod-n-max 16 \
-  --spec-draft-threads 4 --spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1 --spec-draft-ngl 0
+# Run pinned SpecOPD L3 proposal-tree inference with PMU watchdog and N-Gram fallback
+./bin/vcache-run --profile infer -- llama-cli -m target_qwen3.gguf -ngl 99 \
+  --spec-type specopd -md qwen3-specopd-12m-q8_0.gguf \
+  --spec-draft-device none -ngld 0 \
+  --spec-draft-threads 4 --spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1
 ```
 
 ---
