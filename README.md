@@ -139,22 +139,21 @@ Controlled microarchitectural benchmarks on Ryzen 7 7800X3D + RTX 3070 8GB ($n=1
 ```
 zen4-3d-vcache-exploit/
 ├── bin/
-│   ├── vcache-distill-specopd   # Qwen3 12M INT8 (Q8_0) L3 micro-draft GGUF distiller
 │   ├── vcache-run               # Core affinity and memory topology wrapper
 │   └── vcache-spec-bench        # Empirical benchmark harness
 ├── src/vcache/
 │   ├── __init__.py              # Public Python package interface
 │   ├── benchmark.py             # Benchmark harness & multi-run engine
-│   ├── specopd.py               # SpecOPD proposal-tree engine & L3 PMU watchdog
+│   ├── specopd.py               # Proposal-tree engine & Zen 4 L3 PMU watchdog
 │   ├── topology.py              # L3 cache sysfs inspector & affinity resolver
 │   └── vector.py                # AVX-512 ctypes bindings & vector benchmark
 ├── kernels/
-│   ├── l3_specopd_kernel.c      # AVX-512 tree attention, PMU watchdog & CLFLUSHOPT
+│   ├── l3_specopd_kernel.c      # AVX-512 tree attention & Zen 4 Core PMU watchdog
 │   ├── l3_vector_kernel.c       # AVX-512 VPOPCNTDQ / VBMI L3 vector engine
 │   └── Makefile                 # znver4 optimized compiler targets
 ├── tests/
 │   ├── test_benchmark.py        # Metric parsing & vector engine unit tests
-│   ├── test_specopd.py          # SpecOPD tree masks, E2E-TV, budget & watchdog tests
+│   ├── test_specopd.py          # Tree masks, E2E-TV, budget & watchdog tests
 │   └── test_topology.py         # CPU topology & L3 sysfs unit tests
 ├── pyproject.toml
 ├── .gitignore
@@ -166,14 +165,14 @@ zen4-3d-vcache-exploit/
 ### Execution Commands
 
 ```bash
+# Build native AVX-512 and Core PMU watchdog library (libl3_vector.so)
+make -C kernels
+
 # Execute complete speculative decoding benchmark suite
 ./bin/vcache-spec-bench --scenario all
 
 # Export raw metrics for telemetry ingestion (JSON or CSV)
 ./bin/vcache-spec-bench --scenario refactor --format json
-
-# Distill 10.35 MiB Q8_0 L3-resident Qwen3 micro-draft GGUF model
-./bin/vcache-distill-specopd --teacher teacher_qwen3.gguf --output qwen3-specopd-12m-q8_0.gguf
 
 # Run in-L3 AVX-512 vector scan benchmark (10k, 100k, 500k vectors)
 PYTHONPATH=src python3 -m vcache.vector
@@ -184,11 +183,10 @@ PYTHONPATH=src python3 -m vcache.topology
 # Run unit tests
 PYTHONPATH=src python3 -m unittest discover -s tests
 
-# Run pinned SpecOPD L3 proposal-tree inference with PMU watchdog and N-Gram fallback
-./bin/vcache-run --profile infer -- llama-cli -m target_qwen3.gguf -ngl 99 \
-  --spec-type specopd -md qwen3-specopd-12m-q8_0.gguf \
-  --spec-draft-device none -ngld 0 \
-  --spec-draft-threads 4 --spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1
+# Run hybrid GPU + CPU N-Gram speculative decoding
+./bin/vcache-run --profile infer -- llama-cli -m target_model.gguf -ngl 99 \
+  --spec-type ngram-map-k4v,ngram-mod \
+  --draft-max 16 --draft-min 2
 ```
 
 ---
