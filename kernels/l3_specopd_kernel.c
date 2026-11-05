@@ -61,60 +61,106 @@ void avx512_sanitize_kv_buffer(uint8_t* kv_buf, size_t buf_size) {
     _mm_sfence();
 }
 
-// 3. Hardware L3 Cache Watchdog via perf_event_open (AMD Zen 4 PMU compatible)
-static int open_pmu_counter(uint32_t type, uint64_t config) {
-    struct perf_event_attr pe;
-    memset(&pe, 0, sizeof(struct perf_event_attr));
-    pe.type = type;
-    pe.size = sizeof(struct perf_event_attr);
-    pe.config = config;
-    pe.disabled = 0;
-    pe.exclude_kernel = 1;
-    pe.exclude_hv = 1;
-    return (int)syscall(__NR_perf_event_open, &pe, 0, -1, -1, 0);
+// 3. Hardware L3 Cache Watchdog via perf_event_open (AMD Zen 4 Core PMU)
+// Event 0x43: LsDmndFillsFromSys (Demand Data Cache Fills by Data Source)
+#define ZEN4_EVENT_LS_DMND_FILLS_FROM_SYS 0x43ULL
+
+// UMask 0x02: Local CCX (L3 Cache Hit within the 96 MiB 3D V-Cache CCX)
+#define ZEN4_UMASK_L3_HIT_LOCAL_CCX       0x02ULL
+
+// UMask 0x08: DRAM IO Near (L3 Cache Miss served from local DRAM)
+#define ZEN4_UMASK_L3_MISS_DRAM_NEAR      0x08ULL
+
+#define ZEN4_RAW_CONFIG_L3_HIT  ((ZEN4_UMASK_L3_HIT_LOCAL_CCX  << 8) | ZEN4_EVENT_LS_DMND_FILLS_FROM_SYS) // 0x0243ULL
+#define ZEN4_RAW_CONFIG_L3_MISS ((ZEN4_UMASK_L3_MISS_DRAM_NEAR << 8) | ZEN4_EVENT_LS_DMND_FILLS_FROM_SYS) // 0x0843ULL
+
+static inline long perf_event_open_syscall(struct perf_event_attr* hw_event,
+                                           pid_t pid,
+                                           int cpu,
+                                           int group_fd,
+                                           unsigned long flags) {
+    return syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
 }
 
 int l3_perf_watchdog_open(int* fd_access_out, int* fd_misses_out) {
-    if (!fd_access_out || !fd_misses_out) return -1;
-
-    uint64_t llc_access = PERF_COUNT_HW_CACHE_LL |
-                          (PERF_COUNT_HW_CACHE_OP_READ << 8) |
-                          (PERF_COUNT_HW_CACHE_RESULT_ACCESS << 16);
-    uint64_t llc_misses = PERF_COUNT_HW_CACHE_LL |
-                          (PERF_COUNT_HW_CACHE_OP_READ << 8) |
-                          (PERF_COUNT_HW_CACHE_RESULT_MISS << 16);
-
-    int fd_acc = open_pmu_counter(PERF_TYPE_HW_CACHE, llc_access);
-    int fd_mis = open_pmu_counter(PERF_TYPE_HW_CACHE, llc_misses);
-
-    // Fallback to PERF_TYPE_HARDWARE cache-references / cache-misses on AMD Zen 4 PMU
-    if (fd_acc < 0 || fd_mis < 0) {
-        if (fd_acc >= 0) close(fd_acc);
-        if (fd_mis >= 0) close(fd_mis);
-        fd_acc = open_pmu_counter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_REFERENCES);
-        fd_mis = open_pmu_counter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES);
+    if (!fd_access_out || !fd_misses_out) {
+        return -1;
     }
 
-    *fd_access_out = fd_acc;
-    *fd_misses_out = fd_mis;
-    return (fd_acc >= 0 && fd_mis >= 0) ? 0 : -1;
+    *fd_access_out = -1;
+    *fd_misses_out = -1;
+
+    // 1. Configure counter for Local CCX L3 Hits (0x0243)
+    struct perf_event_attr pe_hit;
+    memset(&pe_hit, 0, sizeof(struct perf_event_attr));
+    pe_hit.type           = PERF_TYPE_RAW;
+    pe_hit.size           = sizeof(struct perf_event_attr);
+    pe_hit.config         = ZEN4_RAW_CONFIG_L3_HIT;
+    pe_hit.disabled       = 0;
+    pe_hit.exclude_kernel = 1;
+    pe_hit.exclude_hv     = 1;
+
+    int fd_hit = (int)perf_event_open_syscall(&pe_hit, 0, -1, -1, 0);
+    if (fd_hit < 0) {
+        return -1;
+    }
+
+    // 2. Configure counter for Local DRAM Fills / L3 Misses (0x0843)
+    struct perf_event_attr pe_miss;
+    memset(&pe_miss, 0, sizeof(struct perf_event_attr));
+    pe_miss.type           = PERF_TYPE_RAW;
+    pe_miss.size           = sizeof(struct perf_event_attr);
+    pe_miss.config         = ZEN4_RAW_CONFIG_L3_MISS;
+    pe_miss.disabled       = 0;
+    pe_miss.exclude_kernel = 1;
+    pe_miss.exclude_hv     = 1;
+
+    int fd_miss = (int)perf_event_open_syscall(&pe_miss, 0, -1, -1, 0);
+    if (fd_miss < 0) {
+        close(fd_hit);
+        return -1;
+    }
+
+    // Reset and enable both counters to guarantee a clean measurement window
+    ioctl(fd_hit, PERF_EVENT_IOC_RESET, 0);
+    ioctl(fd_miss, PERF_EVENT_IOC_RESET, 0);
+    ioctl(fd_hit, PERF_EVENT_IOC_ENABLE, 0);
+    ioctl(fd_miss, PERF_EVENT_IOC_ENABLE, 0);
+
+    *fd_access_out = fd_hit;
+    *fd_misses_out = fd_miss;
+    return 0;
 }
 
 int l3_perf_watchdog_read(int fd_access, int fd_misses, uint64_t* access_out, uint64_t* misses_out) {
-    if (fd_access < 0 || fd_misses < 0 || !access_out || !misses_out) return -1;
-
-    uint64_t acc = 0, mis = 0;
-    ssize_t r1 = read(fd_access, &acc, sizeof(uint64_t));
-    ssize_t r2 = read(fd_misses, &mis, sizeof(uint64_t));
-    if (r1 != (ssize_t)sizeof(uint64_t) || r2 != (ssize_t)sizeof(uint64_t)) {
+    if (fd_access < 0 || fd_misses < 0 || !access_out || !misses_out) {
         return -1;
     }
-    *access_out = acc;
-    *misses_out = mis;
+
+    uint64_t l3_hits    = 0;
+    uint64_t dram_fills = 0;
+
+    ssize_t bytes_hit = read(fd_access, &l3_hits, sizeof(uint64_t));
+    if (bytes_hit != (ssize_t)sizeof(uint64_t)) {
+        return -1;
+    }
+
+    ssize_t bytes_miss = read(fd_misses, &dram_fills, sizeof(uint64_t));
+    if (bytes_miss != (ssize_t)sizeof(uint64_t)) {
+        return -1;
+    }
+
+    // Total L3 demand accesses = L3 hits (Local CCX) + L3 misses (DRAM fills)
+    *access_out = l3_hits + dram_fills;
+    *misses_out = dram_fills;
     return 0;
 }
 
 void l3_perf_watchdog_close(int fd_access, int fd_misses) {
-    if (fd_access >= 0) close(fd_access);
-    if (fd_misses >= 0) close(fd_misses);
+    if (fd_access >= 0) {
+        close(fd_access);
+    }
+    if (fd_misses >= 0) {
+        close(fd_misses);
+    }
 }
