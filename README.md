@@ -32,14 +32,13 @@ This repository implements microarchitectural exploitation of the 7800X3D's stac
 | AMD RYZEN 7 7800X3D (8-CORE MONOLITHIC CCD)                                 |
 |                                                                             |
 |  [Cores 0-3] -> System Services / SQLite WAL / Coordination Pipeline        |
-|  [Cores 4-7] -> AVX-512 Vector Execution / L3 Speculative Drafting Engine    |
+|  [Cores 4-7] -> AVX-512 Vector Execution / L3 Speculative Drafting Engine   |
 |                                                                             |
 |  +-----------------------------------------------------------------------+  |
-|  | 96 MiB UNIFIED L3 SRAM POOL (~11 ns latency | ~1.3 TB/s bandwidth)     |  |
+|  | 96 MiB UNIFIED L3 SRAM POOL (~11 ns latency | ~1.3 TB/s bandwidth)    |  |
 |  |                                                                       |  |
-|  |  0x0000_0000 - 0x0280_0000  [<= 40 MiB]  N-Gram Lookup Predictor      |  |
-|  |  0x0280_0000 - 0x03D0_0000  [61.04 MiB]  1M Vector PQ64 FastScan Index |  |
-|  |  0x03D0_0000 - 0x0600_0000  [32.00 MiB]  OS Stack & Cache Headroom    |  |
+|  |  0x0000_0000 - 0x0230_0000  [<= 35 MiB]  SpecOPD Tree + N-Gram Engine |  |
+|  |  0x0230_0000 - 0x0600_0000  [61.04 MiB]  1M Vector PQ64 FastScan      |  |
 |  +-----------------------------------------------------------------------+  |
 +-----------------------------------------------------------------------------+
                                        |
@@ -83,27 +82,21 @@ This repository implements microarchitectural exploitation of the 7800X3D's stac
 
 Automated validation conducted via `vcache-spec-bench` using Qwen 2.5 Coder 7B Instruct (Q4_K_M).
 
-```
-========================================================================================================
-WORKLOAD PROFILE           | BASELINE (NO SPEC) | UNPINNED 8C SMT | L3 PINNED (CORES 4-7) | SPEEDUP | VRAM DELTA
-========================================================================================================
-Code Refactoring (AST)     | 81.0 tok/s         | 135.2 tok/s     | 136.2 tok/s           | 1.68x   | 0 MiB     
-Repetitive Schema / DTO    | 80.7 tok/s         | 81.3 tok/s      | 79.9 tok/s            | 0.99x   | 0 MiB     
-Greenfield Algorithm Logic | 80.3 tok/s         | 79.0 tok/s      | 79.6 tok/s            | 0.99x   | 0 MiB     
-========================================================================================================
-```
+### Baseline vs. N-Gram L3 Pinning (`Cores 4-7`)
+
+| Workload Profile | Baseline (No Spec) | Unpinned 8C SMT | L3 Pinned (`Cores 4-7`) | Speedup | VRAM Delta |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Code Refactoring (AST)** | 81.0 tok/s | 135.2 tok/s | **136.2 tok/s** | **1.68x** | 0 MiB |
+| **Repetitive Schema / DTO** | 80.7 tok/s | 81.3 tok/s | 79.9 tok/s | 0.99x | 0 MiB |
+| **Greenfield Algorithm Logic** | 80.3 tok/s | 79.0 tok/s | 79.6 tok/s | 0.99x | 0 MiB |
 
 ### SpecOPD Hybrid Proposal-Tree vs. Pure N-Gram Predictor (`Cores 4-7`, 0 MiB VRAM)
 
-```
-===================================================================================================================
-WORKLOAD PROFILE           | N-GRAM ACCEPT (α) | N-GRAM SPEEDUP | SPECOPD ACCEPT (α / τ) | SPECOPD TPS | SPEEDUP
-===================================================================================================================
-Code Refactoring (AST)     | 64.5%             | 1.68x          | 82.4% (τ = 3.42)       | 198.5 tok/s | 2.45x
-Repetitive Schema / DTO    | 14.2%             | 0.99x          | 76.8% (τ = 2.95)       | 176.7 tok/s | 2.19x
-Greenfield Algorithm Logic |  3.8%             | 0.99x          | 71.5% (τ = 2.68)       | 169.4 tok/s | 2.11x
-===================================================================================================================
-```
+| Workload Profile | N-Gram Accept ($\alpha$) | N-Gram Speedup | SpecOPD Accept ($\alpha$) | Mean Tree Length ($\tau$) | SpecOPD Throughput | SpecOPD Speedup |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Code Refactoring (AST)** | 64.5% | 1.68x | **82.4%** | 3.42 | **198.5 tok/s** | **2.45x** |
+| **Repetitive Schema / DTO** | 14.2% | 0.99x | **76.8%** | 2.95 | **176.7 tok/s** | **2.19x** |
+| **Greenfield Algorithm Logic** | 3.8% | 0.99x | **71.5%** | 2.68 | **169.4 tok/s** | **2.11x** |
 
 ### Prompt Processing Ingestion (Context Loading)
 * **Refactoring Scenarios:** Baseline `2,004.0 t/s` -> L3 Affinity `2,286.2 t/s` (**+14.1%**)
