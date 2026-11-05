@@ -32,11 +32,11 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 | **[SQLite Zero-Copy & 2MB HugePages](#benchmark-2-sqlite-l3-memory-mapped-residency)** | `60.8 ns` DDR5, `899k` dTLB misses | **`11.0 ns` L3 mmap**, **`17k` dTLB misses** | **`-98.1%` dTLB misses**, **`-65.5%` kernel CPU time** |
 
 > [!IMPORTANT]
-> **Four Counter-Intuitive Hardware Laws Verified on Zen 4 3D V-Cache:**
-> 1. **The 64 MB Safe Boundary (Not 96 MB):** Between **8 MB and 64 MB**, random access latency stays completely flat at **10.6–11.3 ns** (`628.3 GB/s` sustained AVX-512 `VPERMB` read bandwidth across 8 cores, whereas standard 32 MB Zen 4 chips spill to >40 ns DRAM past 32 MB). Above 64 MB, OS and thread stack contention begins, pushing 96 MB latency to **29.6 ns**.
-> 2. **The 4-Core DDR5 Saturation Law:** Once a CPU model or buffer exceeds the 96 MB L3 ceiling and spills into DDR5 (e.g., a 463 MiB 0.5B GGUF draft model or 256 MiB ternary LUT model), **4 physical cores outperform all 8 cores by +15.1% to +28.4%** with **13.4× lower latency jitter**—4 Zen 4 cores completely saturate dual-channel DDR5-6000 bandwidth, and adding more cores triggers memory-controller bank thrashing.
+> **Four Microarchitectural Findings Verified on Zen 4 3D V-Cache:**
+> 1. **The 64 MB Safe Boundary (With 2MB THP):** Between **8 MB and 64 MB**, random access latency remains completely flat at **10.7–11.6 ns** (with Transparent HugePages enabled). Beyond 64 MB, dTLB miss walks and associative victim-cache evictions increase latency to **27.3 ns (96 MB)** and **39.6 ns (128 MB DRAM)**. Disabling THP pushes latency upward even earlier (at 16–24 MB).
+> 2. **Multi-Core Scaling & DDR5 Bandwidth Saturation:** For models exceeding L3 (such as a 463 MiB Q4_K_M model), CPU generation scales from **97.2 tok/s (2C)** to **152.7 tok/s (4C)** and **173.5 tok/s (6C)** under symmetric core isolation. Previous reports of an 8-core drop to 131 tok/s were scheduler artifacts from unisolated desktop tasks on cores 0–3. Streaming read bandwidth peaks at **63.5 GB/s**, while implied weight bandwidth reaches 84.2 GB/s—proving that **~15–20% of weights remain resident in the 96 MiB L3 / 8 MiB L2 hierarchy**.
 > 3. **Exclusive Victim-Cache Eviction & The `_MM_HINT_NTA` Guard:** Because Zen 4's 96 MB L3 is a mostly exclusive victim cache filled by L2 evictions, streaming 64 MiB of cold DDR5 data via standard temporal loads flushes L2 into L3 and **degrades hot L3 index latency by +238.6%** (`11.56 ns` $\rightarrow$ `39.14 ns/hop`). Issuing `_mm_prefetch(..., _MM_HINT_NTA)` + `_mm512_stream_load_si512` (`VMOVNTDQA`) **eliminates 100% of L3 pollution** (`11.05 ns/hop`).
-> 4. **Zero-VRAM Speculative Co-Existence:** On VRAM-constrained GPUs, offloading speculative drafting (`<12 MiB` n-gram or `56 MiB` 1.58-bit `VPERMB` LUT), `PQ64` 1M-vector RAG (`61 MiB`), and MoE Shared Experts (`48 MiB`) into 3D V-Cache delivers **1.35×–10.80×** generation speedup with **`0 MiB` extra GPU VRAM**.
+> 4. **Zero-VRAM Speculative Co-Existence:** Pairing GPU generation with CPU-side n-gram speculative decoding delivers **1.61× (cold)** to **4.53× (warm)** speedups with **`0 MiB` extra GPU VRAM**. The n-gram state machine is largely insensitive to L3 contention (dropping only 1.2% under a concurrent 64 MiB L3 thrasher), demonstrating that gains are driven by algorithmic acceptance and parallel GPU batch verification. In `llama.cpp`, `--spec-draft-cpu-range` is a no-op for n-gram drafting.
 
 ### Test Rig & Environment Specifications
 
@@ -293,29 +293,34 @@ int32_t vnni_dot_product(const uint8_t* query_u8, const int8_t* centroid_s8, int
 
 ---
 
-## Benchmark 6: Hybrid GPU + L3-Resident Speculative Drafting & The 4-Core DDR5 Saturation Law
+## Benchmark 6: Hybrid GPU + CPU Speculative Drafting & Multi-Core Scaling
 
-When pairing an 8 GB discrete GPU (NVIDIA RTX 3070) running a 9B hybrid language model (`Qwen3.5-9B-Instruct-Q4_K_M`, 5.42 GiB, `c=8192` full FP16) with CPU-side speculative decoding on the Ryzen 7 7800X3D, a critical hardware boundary emerges between **dense draft models** and **L3-resident zero-weight predictors**:
+When pairing an 8 GB discrete GPU (NVIDIA RTX 3070) with CPU-side speculative decoding on the Ryzen 7 7800X3D, microarchitectural evaluation clarifies the boundaries between memory-bound dense models and zero-weight algorithmic drafting:
 
-### 1. The 4-Core DDR5 Saturation Law (Why 0.5B Dense Drafts Spill Out of V-Cache)
-A quantized dense draft model (`Qwen2.5-Coder-0.5B-Q4_K_M`) occupies **462.96 MiB**—exceeding the 96 MB 3D V-Cache by **4.8×** and streaming all weights from dual-channel DDR5-6000 on every generated token:
+### 1. Multi-Core Scaling on Dense Sub-1GB Models (`Qwen2.5-Coder-0.5B-Q4_K_M`, 463 MiB)
+A dense quantized draft model (`462.96 MiB`) exceeds the 96 MB L3 cache by **4.8×**. Under symmetric desktop isolation (Hyprland pinned to cores 0–1):
 
-| CPU Thread Pinning (`vcache-run`, `jemalloc` + `hugetlb`) | Prompt Processing (`pp128`) | Token Generation (`tg64`) | Latency / Token | Microarchitectural Bottleneck |
+| CPU Thread Allocation | Prompt Processing (`pp128` GPU Offload) | Token Generation (`tg64` CPU) | Implied Bandwidth | Microarchitectural Scaling |
 |:---|:---|:---|:---|:---|
-| **4 Physical Cores (`Cores 4–7`, `--profile infer`)** | `687.71 ± 1.44 t/s` | **`154.53 ± 0.89 t/s`** | `6.47 ms/tok` | Saturates dual-channel DDR5-6000 memory bus |
-| **8 Physical Cores (`Cores 0–7`, `--profile all`)** | `1096.21 ± 35.20 t/s` | **`131.17 ± 11.96 t/s`** | `7.62 ms/tok` | **-15.1% degradation** & **13.4× higher jitter** from memory controller contention |
+| **2 Physical Cores (`Cores 6–7`)** | `4,321.2 ± 107.0 t/s` | **`97.2 ± 0.9 t/s`** | `47.2 GB/s` | Single memory channel bound |
+| **4 Physical Cores (`Cores 4–7`, Pinned)** | `4,501.4 ± 70.7 t/s` | **`152.7 ± 2.3 t/s`** | `74.1 GB/s` | Dual-channel DDR5 saturation regime |
+| **4 Physical Cores (`Cores 2–7`, Unpinned)** | `4,472.8 ± 192.5 t/s` | **`154.0 ± 2.6 t/s`** | `74.7 GB/s` | Indistinguishable from pinned (single CCD) |
+| **6 Physical Cores (`Cores 2–7`)** | `4,528.9 ± 71.9 t/s` | **`173.5 ± 5.0 t/s`** | `84.2 GB/s` | **+13.6% throughput** over 4 cores |
+| **8 Physical Cores (`Cores 0–7`)** | `4,366.6 ± 765.4 t/s` | **`170.8 ± 43.7 t/s`** | `82.9 GB/s` | Cores 0–1 share desktop tasks (higher IQR) |
 
-### 2. Hybrid GPU + L3-Resident Speculative Decoding (`< 12 MiB` L3 SRAM, `0 MiB` Extra VRAM)
-By replacing the 463 MiB dense draft model with an **L3-resident n-gram lookup state machine** (`--spec-type ngram-map-k4v,ngram-mod`) pinned strictly to `Cores 4–7` (`--spec-draft-cpu-range 4-7 --spec-draft-cpu-strict 1`), the entire drafting predictor (< 12 MiB) remains 100% inside the 96 MB 3D V-Cache while the RTX 3070 verifies draft tokens in parallel batches:
+*DDR5 Read Ceiling vs. L3 Residency*: Measured streaming DDR5-6000 read bandwidth peaks at **63.5 GB/s**. Because implied weight bandwidth at 173.5 t/s reaches **84.2 GB/s**, approximately **~15–20% of weights remain resident in the 96 MiB L3 / 8 MiB L2 hierarchy** between decode steps.
 
-| Inference Configuration (`Qwen3.5-9B-Q4_K_M`, `c=8192` Full FP16, `-ngl 99 -fa on`) | Prompt Processing | Token Generation | Speedup vs. Baseline | Extra GPU VRAM | L3 SRAM Footprint |
+### 2. Hybrid GPU + N-Gram Speculative Decoding Attribution (`0 MiB` Extra VRAM)
+Evaluating n-gram speculative decoding (`--spec-type ngram-map-k4v,ngram-mod`) against GPU targets:
+
+| Inference Configuration (RTX 3070 8GB, `-ngl 99 -fa on`) | Clean L3 (T0) | 64 MiB L3 Thrasher (T64) | Speedup vs. Baseline | Extra GPU VRAM | Draft Acceptance |
 |:---|:---|:---|:---|:---|:---|
-| **Pure GPU Baseline (Standard Thinking)** | `1,784.0 t/s` | `66.9 t/s` | `1.03×` | `0 MiB` | `0 MiB` |
-| **Pure GPU Baseline (Direct Code Generation)** | `1,878.7 t/s` | **`65.0 t/s`** | `1.00×` | `0 MiB` | `0 MiB` |
-| **Hybrid GPU + L3 Speculative (Greenfield Rust Code)** | `2,075.6 t/s` | **`87.9 t/s`** | **`1.35×` (+35.2%)** | **`0 MiB`** | **`< 12 MiB`** |
-| **Hybrid GPU + L3 Speculative (Code Refactoring / Edit)** | **`2,396.1 t/s`** | **`701.9 t/s`** | **`10.80×` (+979.8%)** | **`0 MiB`** | **`< 12 MiB`** |
+| **Baseline Direct Generation (No Spec)** | `438.9 ± 5.2 t/s` | `439.1 ± 14.7 t/s` | `1.00×` | `0 MiB` | — |
+| **N-Gram Speculative (Cold Refactoring)** | `707.9 ± 3.6 t/s` | `708.6 ± 3.4 t/s` | **`1.61×` (+61.3%)** | `0 MiB` | 183 / 311 (58.8%) |
+| **N-Gram Speculative (Warm Refactoring)** | `1,992.4 ± 9.4 t/s` | `1,968.4 ± 12.7 t/s` | **`4.53×` (+353.1%)** | `0 MiB` | 349 / 465 (75.1%) |
+| **N-Gram Speculative (Greenfield Code)** | `563.3 ± 3.0 t/s` | `565.8 ± 2.5 t/s` | **`1.24×` (+24.4%)** | `0 MiB` | 130 / 275 (47.3%) |
 
-> **VRAM Footprint Note (`common_memory_breakdown_print`)**: Because `Qwen3.5-9B` utilizes a hybrid architecture (`24` linear Gated DeltaNet recurrent SSM layers requiring a fixed `50.25 MiB` state + `8` full-attention GQA layers requiring `256.00 MiB` at `c=8192` FP16), total `CUDA0` memory is **`5,279 MiB`** (`4,861 MiB` weights + `306.25 MiB` context + `112.02 MiB` compute), leaving **`1,987 MiB` (~2.0 GB) of free VRAM headroom** on an 8 GB RTX 3070 without KV cache quantization.
+*Attribution Note*: Evicting L3 via a concurrent 64 MiB memory thrasher causes only a **1.2% drop** on warm refactoring, confirming that n-gram speedups are governed by algorithmic prefix matching and parallel GPU batch verification rather than L3 cache capacity. Note that in upstream `llama.cpp`, `--spec-draft-cpu-range` is a no-op for n-gram predictors (applies only to full draft models).
 
 ---
 
@@ -325,8 +330,8 @@ Because all 8 cores of the Ryzen 7 7800X3D reside on a **single monolithic CCD s
 
 | IPC Mechanism (Cross-Process: Producer on Core 0 $\leftrightarrow$ Consumer on Core 4) | One-Way Latency | Sustained Throughput | Bandwidth (128B Slot) | Relative Speedup |
 |:---|:---|:---|:---|:---|
-| **L3 Lockless Ring-Buffer (`/dev/shm`, 8.00 MiB Pipelined)** | **`2.48 ns / msg`** | **`402.89 M msgs/sec`** | **`48.03 GB/s`** | **`993.1×` faster** |
-| **L3 Lockless Ring-Buffer (`/dev/shm`, Ping-Pong RTT / 2)** | **`34.74 ns`** (`69.47 ns` RTT) | `28.78 M round-trips/s` | `3.68 GB/s` | **`71.0×` faster** |
+| **L3 Lockless Ring-Buffer (`/dev/shm`, 8.00 MiB Pipelined Slot)** | **`2.48 ns / msg`** | **`402.89 M msgs/sec`** | **`48.03 GB/s`** | **`993.1×` throughput** (streaming) |
+| **L3 Lockless Ring-Buffer (`/dev/shm`, Ping-Pong RTT / 2)** | **`34.74 ns`** (`69.47 ns` RTT) | `28.78 M round-trips/s` | `3.68 GB/s` | **`71.0×` latency** (ping-pong) |
 | **Linux Kernel `AF_UNIX` `socketpair` (`SOCK_STREAM`)** | `2,464.95 ns` | `0.41 M msgs/sec` | `0.05 GB/s` | `1.0×` (Baseline) |
 | **Subprocess `fork() + waitpid()` Invocation** | `78,967.98 ns` (`78.97 µs`) | `12.66 K spawns/sec` | — | `31,816×` slower |
 
@@ -562,8 +567,8 @@ To guarantee deterministic, sub-millisecond residency on AMD single-CCD X3D proc
 4. **Partition Cores for I/O and Compute Isolation**:
    When combining background compute or model generation with low-latency search, partition the 8 physical cores: bind database and vector search workers to Cores 0–3 and heavy background threads to Cores 4–7. This preserves sub-millisecond p99 latency (759 µs vs. 790 µs unpinned) and reduces latency jitter by **12.2%** even under heavy DDR5 memory bus flooding.
 
-5. **The 4-Core DDR5 Saturation Law (For Weights Spilling Out of L3)**:
-   Whenever a CPU model or buffer exceeds the 96 MB 3D V-Cache (e.g., a 463 MiB 0.5B GGUF model or 256 MiB ternary LUT model), **restrict execution strictly to 4 physical cores (`-t 4`)**. Dual-channel DDR5-6000 bandwidth (~75–93 GB/s) saturates completely at 4 Zen 4 cores (`154.53 t/s`); scaling to 8 cores causes memory-controller bank thrashing, **reducing throughput by -15.1% to -22.1%** and increasing latency jitter by **13.4×**.
+5. **Multi-Core Scaling & DDR5 Bandwidth (For Weights Spilling Out of L3)**:
+   When running CPU models or buffers exceeding the 96 MB 3D V-Cache (e.g., a 463 MiB 0.5B GGUF model), throughput scales effectively across 4 to 6 physical cores (`152.7 tok/s` at 4C up to `173.5 tok/s` at 6C). Avoid assigning threads to cores hosting latency-sensitive desktop services or IRQs (such as cores 0–1 under Hyprland), as unmanaged scheduler contention previously mimicked a false "8-core regression". Dual-channel DDR5-6000 streaming read bandwidth caps at **63.5 GB/s**, with sub-1GB models benefiting from ~15–20% partial L3/L2 weight retention.
 
 6. **Two-Tier Graph & PQ64 Separation (Hot L3 Sketch vs. Cold DRAM Payload)**:
    Never interleave full `FP32` vectors (`2,048 B`) inside HNSW graph nodes or exhaustive scan arrays. Keep Layer-0 adjacency lists (`64 B`), `INT8` sketches (`320 B/node`), or transposed `PQ64` codes (`61.04 MiB` for 1M vectors) inside a dedicated L3-resident array, and touch DRAM payloads only during final Top-K rescoring.
