@@ -60,7 +60,7 @@ This repository provides reproducible benchmarks and raw Linux PMU hardware perf
 - [Benchmark 3: TLB Mitigation via 2MB HugePages](#benchmark-3-tlb-mitigation-via-2mb-hugepages)
 - [Benchmark 4: Memory Bus Contention & Core Pinning Isolation](#benchmark-4-memory-bus-contention--core-pinning-isolation)
 - [Benchmark 5: Production Two-Stage L3 Vector RAG & AVX-512 SIMD Acceleration](#benchmark-5-production-two-stage-l3-vector-rag--avx-512-simd-acceleration)
-- [Benchmark 6: Hybrid GPU + L3-Resident Speculative Drafting & The 4-Core DDR5 Saturation Law](#benchmark-6-hybrid-gpu--l3-resident-speculative-drafting--the-4-core-ddr5-saturation-law)
+- [Benchmark 6: Hybrid GPU + CPU Speculative Drafting & Multi-Core Scaling](#benchmark-6-hybrid-gpu--cpu-speculative-drafting--multi-core-scaling)
 - [Benchmark 7: Nanosecond L3 Lockless Ring-Buffer IPC (/dev/shm)](#benchmark-7-nanosecond-l3-lockless-ring-buffer-ipc-devshm)
 - [Benchmark 8: Hierarchical Two-Tier L3 HNSW Vector Graph](#benchmark-8-hierarchical-two-tier-l3-hnsw-vector-graph)
 - [Benchmark 9: Streaming In-L3 Zstandard Dictionary & LZ4 Decompression Pipeline](#benchmark-9-streaming-in-l3-zstandard-dictionary--lz4-decompression-pipeline)
@@ -427,10 +427,10 @@ To corroborate the microkernel in production, we benchmarked an end-to-end 35B M
 | Execution Topology | Core & Thread Topology | Prompt Processing (pp512) | Token Generation (tg128) | Net Gain vs Baseline |
 |:---|:---|:---:|:---:|:---:|
 | **Test A: Naive 8-Core Offload** | `-t 8` (All 8 cores streaming DDR5) | `394.00 t/s` | `53.10 t/s` | Baseline |
-| **Test B: 4-Core DDR5 Saturation Law** | `vcache-run --profile infer` (`Cores 4-7`, `-t 4`, `jemalloc`, `hugetlb`) | **`404.50 t/s`** | **`58.20 t/s`** | **+9.6% (+5.1 t/s)** |
+| **Test B: Isolated 4-Core Offload** | `vcache-run --profile infer` (`Cores 4-7`, `-t 4`, `jemalloc`, `hugetlb`) | **`404.50 t/s`** | **`58.20 t/s`** | **+9.6% (+5.1 t/s)** |
 | **Test C: 4-Core + L3 N-Gram Drafter** | `Cores 4-7` + `--spec-type ngram-map-k4v,ngram-mod` | `400.20 t/s` | `57.30 t/s` | Zero extra VRAM overhead |
 
-**Key Takeaway**: End-to-end `llama.cpp` execution directly confirms the 4-Core DDR5 Saturation Law: restricting DDR5 MoE expert streams to 4 Zen 4 physical cores eliminates memory bus thrashing, achieving **`58.20 tok/s` on a 35B MoE model using a consumer 8 GB GPU**.
+**Key Takeaway**: End-to-end `llama.cpp` execution confirms the importance of scheduler isolation: restricting DDR5 MoE expert streams to 4 isolated Zen 4 physical cores eliminates contention with desktop workloads, achieving **`58.20 tok/s` on a 35B MoE model using a consumer 8 GB GPU**.
 
 ### Real-World Production Validation: ThinkingCap Gemma-4-26B-A4B MXFP4 MoE & CoT Compression
 
