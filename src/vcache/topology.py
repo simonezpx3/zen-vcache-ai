@@ -146,7 +146,7 @@ def get_cpu_topology() -> CpuTopology:
         has_3d_vcache=has_3d_vcache,
         is_monolithic_ccd=is_monolithic_ccd,
         recommended_infer_cores=recommended_cores,
-        avx512_vbmi_supported="avx512_vbmi" in flags,
+        avx512_vbmi_supported=bool(flags & {"avx512vbmi", "avx512_vbmi"}),
         avx512_vnni_supported="avx512_vnni" in flags,
     )
 
