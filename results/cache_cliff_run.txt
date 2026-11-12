@@ -1,0 +1,19 @@
+====================================================================================================
+ AMD Ryzen 7 7800X3D Cache & TLB Cliff Benchmark (Pointer Chasing, CPU Pinned, 2MB Aligned)
+ Unified 96MB L3 (3D V-Cache) vs System DDR5 | 4KB Pages (TLB-bound) vs 2MB THP (Cache-bound)
+====================================================================================================
+Size       | 4KB Latency (med±std) | 2MB THP (med±std)     | Primary Bottleneck / Zone     
+-----------+------------------------+------------------------+--------------------------------------
+   8 MB    |     12.60 ±  0.12 ns   |     10.90 ±  0.07 ns   | L3 SRAM (Fits in L2 dTLB)
+  16 MB    |     14.08 ±  0.10 ns   |     11.11 ±  0.14 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  24 MB    |     15.48 ±  0.22 ns   |     11.20 ±  0.07 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  32 MB    |     16.09 ±  0.30 ns   |     11.39 ±  0.14 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  48 MB    |     17.33 ±  1.74 ns   |     11.62 ±  1.24 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  64 MB    |     24.57 ±  1.31 ns   |     14.46 ±  2.38 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  80 MB    |     30.26 ±  0.66 ns   |     18.95 ±  5.99 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  96 MB    |     38.21 ±  1.45 ns   |     25.68 ±  1.61 ns   | Unified 96MB L3 (4KB = TLB Misses)
+ 112 MB    |     47.43 ±  1.50 ns   |     37.18 ±  0.68 ns   | DDR5 Memory Bus (L3 Spillover)
+ 128 MB    |     52.09 ±  0.77 ns   |     43.46 ±  1.95 ns   | DDR5 Memory Bus (L3 Spillover)
+ 160 MB    |     60.30 ±  2.43 ns   |     51.65 ±  1.80 ns   | DDR5 Memory Bus (L3 Spillover)
+ 256 MB    |     68.54 ±  0.75 ns   |     58.84 ±  0.34 ns   | DDR5 Memory Bus (L3 Spillover)
+====================================================================================================

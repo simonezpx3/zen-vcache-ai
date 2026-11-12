@@ -7,12 +7,19 @@ Resident L3 SRAM tensor footprint: ~10.35 MiB (< 15 MiB ceiling).
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path.home() / "Projects/llama.cpp-lfm3/gguf-py"))
+gguf_py_dir = os.environ.get("GGUF_PY_DIR")
+if gguf_py_dir:
+    sys.path.insert(0, gguf_py_dir)
+else:
+    local_gguf = Path.home() / "Projects/llama.cpp-lfm3/gguf-py"
+    if local_gguf.exists():
+        sys.path.insert(0, str(local_gguf))
 import gguf
 
 
@@ -168,12 +175,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--teacher",
         type=Path,
-        default=Path("/mnt/FastSATA/ai_models/bonsai/models/Qwen3-0.6B-Instruct-Q4_K_M.gguf"),
+        required=True,
+        help="Path to teacher Qwen3 GGUF model",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path.home() / "models/qwen3-4b/qwen3-specopd-12m-q8_0.gguf",
+        default=Path("qwen3-specopd-12m-q8_0.gguf"),
+        help="Output micro-draft GGUF path",
     )
     args = parser.parse_args()
     distill_qwen3_micro_draft(args.teacher, args.output)

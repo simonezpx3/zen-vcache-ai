@@ -1,0 +1,27 @@
+======================================================================
+AMD Ryzen 7 7800X3D: 3D V-Cache Contention & Isolation Benchmark
+======================================================================
+Index loaded: 1252 documents, 78.25 KiB L3 Hot Index.
+
+Phase 1 // Measuring Quiet Baseline (No Contention)...
+
+Phase 2 // Spawning 4 Memory Thrashers on Cores 4-7 (128MB each -> DDR5)...
+Phase 3 // Running Scenario A: Unpinned / Default Scheduling (Cores 0-7)...
+Phase 4 // Running Scenario B: vcache-run Core Isolation (Cores 0-3)...
+
+Stopping background stress workers...
+
+==============================================================================
+Metric             | Quiet (Cores 0-3) | Unpinned under Load  | vcache-run Isolated
+------------------------------------------------------------------------------
+P50                | 590.4 µs         | 650.6 µs             | 660.1 µs          
+P90                | 625.6 µs         | 701.1 µs             | 720.9 µs          
+P95                | 630.1 µs         | 716.8 µs             | 745.5 µs          
+P99                | 633.9 µs         | 746.6 µs             | 785.3 µs          
+MAX                | 640.6 µs         | 808.6 µs             | 803.0 µs          
+JITTER (STD)       | 18.3 µs          | 37.5 µs              | 47.8 µs           
+==============================================================================
+
+Result: vcache-run isolation reduces p99 tail latency by -38.7 µs
+Jitter reduction: -27.6% lower standard deviation.
+Detailed metrics saved to: results/contention_benchmark_results.json

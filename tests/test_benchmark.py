@@ -40,6 +40,11 @@ class TestBenchmark(unittest.TestCase):
         dist_zero = engine.batch_hamming(vec_a, vec_a, 1)
         self.assertEqual(dist_zero[0], 0)
 
+        # Multi-threaded OpenMP path matches single-threaded output
+        batch = vec_b + vec_a + vec_b + vec_a
+        dist_mt = engine.batch_hamming(vec_a, batch, 4, threads=4)
+        self.assertEqual(dist_mt, [512, 0, 512, 0])
+
 
 if __name__ == "__main__":
     unittest.main()

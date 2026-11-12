@@ -1,4 +1,5 @@
 #include <immintrin.h>
+#include <omp.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -39,6 +40,31 @@ void avx512_batch_hamming_512(
         __m512i vx = _mm512_xor_si512(vq, vd);
         __m512i vcnt = _mm512_popcnt_epi64(vx);
         distances_out[i] = (uint16_t)_mm512_reduce_add_epi64(vcnt);
+    }
+}
+
+// Multi-threaded OpenMP Batch Hamming scan across L3 cores
+void avx512_batch_hamming_512_mt(
+    const uint8_t* query,
+    const uint8_t* doc_matrix,
+    int num_docs,
+    uint16_t* distances_out,
+    int num_threads
+) {
+    if (num_threads <= 1) {
+        avx512_batch_hamming_512(query, doc_matrix, num_docs, distances_out);
+        return;
+    }
+    __m512i vq = _mm512_loadu_si512((const __m512i*)query);
+    #pragma omp parallel num_threads(num_threads)
+    {
+        #pragma omp for schedule(static)
+        for (int i = 0; i < num_docs; i++) {
+            __m512i vd = _mm512_loadu_si512((const __m512i*)(doc_matrix + (size_t)i * 64));
+            __m512i vx = _mm512_xor_si512(vq, vd);
+            __m512i vcnt = _mm512_popcnt_epi64(vx);
+            distances_out[i] = (uint16_t)_mm512_reduce_add_epi64(vcnt);
+        }
     }
 }
 

@@ -8,6 +8,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -16,8 +17,23 @@ from pathlib import Path
 
 from .topology import get_cpu_topology
 
-DEFAULT_LLAMA_CLI = Path.home() / ".local/share/lfm3/bin/llama-cli"
-DEFAULT_VCACHE_RUN = Path.home() / ".local/bin/vcache-run"
+
+def _resolve_default_llama_cli() -> Path:
+    found = shutil.which("llama-cli")
+    if found:
+        return Path(found)
+    return Path.home() / ".local/share/lfm3/bin/llama-cli"
+
+
+def _resolve_default_vcache_run() -> Path:
+    found = shutil.which("vcache-run")
+    if found:
+        return Path(found)
+    return Path(__file__).resolve().parent.parent.parent / "bin/vcache-run"
+
+
+DEFAULT_LLAMA_CLI = _resolve_default_llama_cli()
+DEFAULT_VCACHE_RUN = _resolve_default_vcache_run()
 
 SCENARIOS: dict[str, dict] = {
     "refactor": {

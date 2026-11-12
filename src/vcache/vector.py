@@ -47,6 +47,16 @@ class L3VectorEngine:
         ]
         self.lib.avx512_batch_hamming_512.restype = None
 
+        # avx512_batch_hamming_512_mt
+        self.lib.avx512_batch_hamming_512_mt.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_uint16),
+            ctypes.c_int,
+        ]
+        self.lib.avx512_batch_hamming_512_mt.restype = None
+
         # avx512_int8_dot_512
         self.lib.avx512_int8_dot_512.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
         self.lib.avx512_int8_dot_512.restype = ctypes.c_int32
@@ -61,27 +71,46 @@ class L3VectorEngine:
         ]
         self.lib.avx512_batch_rerank_candidates.restype = None
 
-    def batch_hamming(self, query: bytes, doc_matrix: bytes, num_docs: int) -> list[int]:
+    def batch_hamming(
+        self, query: bytes, doc_matrix: bytes, num_docs: int, threads: int = 1
+    ) -> list[int]:
         assert len(query) == 64, "Query must be 64 bytes (512 bits)"
         assert len(doc_matrix) >= num_docs * 64, "Doc matrix buffer too small"
         distances = (ctypes.c_uint16 * num_docs)()
-        self.lib.avx512_batch_hamming_512(query, doc_matrix, num_docs, distances)
+        if threads > 1:
+            self.lib.avx512_batch_hamming_512_mt(
+                query, doc_matrix, num_docs, distances, threads
+            )
+        else:
+            self.lib.avx512_batch_hamming_512(query, doc_matrix, num_docs, distances)
         return list(distances)
 
-    def benchmark_scan(self, num_vectors: int = 100_000, iterations: int = 50) -> dict:
+    def benchmark_scan(
+        self, num_vectors: int = 100_000, iterations: int = 50, threads: int = 1
+    ) -> dict:
         """Measure exhaustive L3 scan performance."""
         # Create synthetic 64-byte vectors
         raw_matrix = os.urandom(num_vectors * 64)
         query = os.urandom(64)
         out_buf = (ctypes.c_uint16 * num_vectors)()
 
+        def _scan():
+            if threads > 1:
+                self.lib.avx512_batch_hamming_512_mt(
+                    query, raw_matrix, num_vectors, out_buf, threads
+                )
+            else:
+                self.lib.avx512_batch_hamming_512(
+                    query, raw_matrix, num_vectors, out_buf
+                )
+
         # Warmup
-        self.lib.avx512_batch_hamming_512(query, raw_matrix, num_vectors, out_buf)
+        _scan()
 
         durations = []
         for _ in range(iterations):
             t0 = time.perf_counter_ns()
-            self.lib.avx512_batch_hamming_512(query, raw_matrix, num_vectors, out_buf)
+            _scan()
             durations.append(time.perf_counter_ns() - t0)
 
         durations.sort()
@@ -105,16 +134,19 @@ class L3VectorEngine:
 
 def main():
     print("=" * 70)
-    print(" AVX-512 L3 RESIDENT VECTOR SCAN BENCHMARK")
+    print(" AVX-512 L3 RESIDENT VECTOR SCAN BENCHMARK (1T vs 8T OpenMP)")
     print("=" * 70)
     engine = L3VectorEngine()
+    max_threads = min(8, os.cpu_count() or 1)
 
-    for count in [10_000, 100_000, 500_000]:
-        res = engine.benchmark_scan(num_vectors=count, iterations=30)
-        print(f"Index Size: {count:,} vectors ({res['index_size_mib']} MiB)")
-        print(f"  • Latency   : {res['median_latency_us']} µs")
-        print(f"  • Queries/s : {res['qps']:,.1f} QPS")
-        print(f"  • Throughput: {res['bandwidth_gb_s']} GB/s ({res['vectors_per_sec'] / 1e9:.2f} B vec/s)")
+    for count in [100_000, 500_000, 1_000_000]:
+        for t in sorted({1, max_threads}):
+            res = engine.benchmark_scan(num_vectors=count, iterations=30, threads=t)
+            print(
+                f"Index: {count:>9,} vec ({res['index_size_mib']:>5.2f} MiB) | T={t} | "
+                f"{res['median_latency_us']:>7.2f} µs | {res['qps']:>9,.1f} QPS | "
+                f"{res['bandwidth_gb_s']:>6.2f} GB/s"
+            )
         print("-" * 70)
 
 

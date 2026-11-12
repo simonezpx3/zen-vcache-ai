@@ -1,5 +1,5 @@
 CC ?= gcc
-CFLAGS ?= -O3 -march=znver4 -mavx512f -mavx512bw -mavx512dq -mavx512vl -mavx512vpopcntdq -mavx512vnni -mavx512vbmi -fPIC -shared
+CFLAGS ?= -O3 -march=znver4 -mavx512f -mavx512bw -mavx512dq -mavx512vl -mavx512vpopcntdq -mavx512vnni -mavx512vbmi -fopenmp -fPIC -shared
 
 all: libl3_vector.so
 

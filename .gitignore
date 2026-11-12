@@ -1,8 +1,18 @@
-# Build artifacts
+# Build artifacts & compiled benchmark binaries
 *.so
 *.o
 *.a
 *.bin
+benchmarks/cache_cliff
+benchmarks/hugepages_test
+benchmarks/simd_l3_rag
+benchmarks/l3_lockless_ipc
+benchmarks/l3_hnsw_two_tier
+benchmarks/l3_zstd_dict_stream
+benchmarks/l3_vpermb_ternary_lut
+benchmarks/l3_nta_pollution_guard
+benchmarks/l3_pq64_fastscan_1m
+benchmarks/l3_moe_shared_expert_pinning
 
 # Python
 __pycache__/
@@ -10,6 +20,15 @@ __pycache__/
 *$py.class
 .venv/
 env/
+.pytest_cache/
+.ruff_cache/
+
+# Temporary and local databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.gguf
 
 # System / IDE
 .DS_Store

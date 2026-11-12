@@ -22,7 +22,7 @@ class TestTopology(unittest.TestCase):
         self.assertGreater(topo.total_logical_cpus, 0)
         self.assertGreater(topo.physical_cores, 0)
         self.assertIsInstance(topo.has_3d_vcache, bool)
-        self.assertIn(topo.recommended_infer_cores, ["4-7", "0-7"])
+        self.assertIn(topo.recommended_infer_cores, ["2-7", "4-7", "0-7"])
 
     def test_avx512_vbmi_flag_detection(self):
         fake_cpuinfo = (

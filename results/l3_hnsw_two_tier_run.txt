@@ -1,0 +1,21 @@
+====================================================================
+ AMD Zen 4 Two-Tier L3 HNSW Graph Benchmark (Ryzen 7 7800X3D)
+====================================================================
+
+1. HNSW Memory Ratio Analysis (512-dim, M=16, L3 Partition = 320 B/node):
+   Vectors    | Monolithic DRAM      | L3 Tier-1 Partition    |  Fits 96MB L3? 
+   -----------------------------------------------------------------------------
+   50000      |           100.71 MiB |              15.26 MiB | YES (100% L3)
+   100000     |           201.42 MiB |              30.52 MiB | YES (100% L3)
+   250000     |           503.54 MiB |              76.29 MiB | YES (100% L3)
+   500000     |          1007.08 MiB |             152.59 MiB | Upper-Layers L3
+
+2. Constructing Navigable Small-World Graph (100000 vectors, 512-dim, 250 upper clusters)...
+   - Monolithic DRAM Footprint: 201.42 MiB (2.1x larger than 96MB L3 -> DRAM bound)
+   - L3 Tier-1 Hot Partition:   31.01 MiB (100% inside 96MB 3D V-Cache)
+
+3. Empirical ANN Search Performance (500 queries, ef=36, Top-10):
+   - Monolithic DRAM HNSW (201.4 MiB):  36928.2 QPS |  27.08 us/query | Recall@10 = 1.0000
+   - Two-Tier L3 HNSW     ( 31.0 MiB):  62733.0 QPS |  15.94 us/query | Recall@10 = 1.0000
+   - Speedup vs. Monolithic DRAM:      1.70x (+69.9% higher QPS)
+====================================================================

@@ -118,10 +118,10 @@ def get_cpu_topology() -> CpuTopology:
     is_monolithic_ccd = len(l3_domains) == 1
 
     # Recommended infer cores:
-    # On 7800X3D (single 8C CCD): pin to cores 4-7 (isolating cores 0-3 for system/IO)
+    # On 7800X3D (single 8C CCD): pin to cores 2-7 (6 cores optimal for DDR5 spill, isolating 0-1 for OS/compositor)
     # On multi-CCD parts: pin strictly to the V-Cache CCD
     if has_3d_vcache and is_monolithic_ccd:
-        recommended_cores = "4-7"
+        recommended_cores = "2-7" if physical_cores >= 8 else "0-3"
     elif has_3d_vcache:
         vcache_cpus = next((d.shared_cpus for d in l3_domains if d.is_vcache), [])
         if len(vcache_cpus) >= 8:

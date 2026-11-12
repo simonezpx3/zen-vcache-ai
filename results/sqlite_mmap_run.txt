@@ -1,0 +1,5 @@
+[*] Building benchmark SQLite database at /tmp/vcache_bench_89sqkl6e/bench.db (40000 rows)...
+[*] Database created: 17.52 MB
+[+] Baseline (Standard I/O): 8232.65 ms (60.7 QPS, 5000 hits)
+[+] L3 Zero-Copy MMAP:       9156.34 ms (54.6 QPS, 5000 hits)
+[+] Performance delta:        -11.2% execution time reduction

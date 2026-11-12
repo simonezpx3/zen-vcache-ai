@@ -1,0 +1,25 @@
+====================================================================
+ AMD Zen 4 3D V-Cache + RTX 3070 8GB Hybrid Speculative Drafting
+====================================================================
+Target Model:  Qwen3.5-9B-Instruct-Q4_K_M.gguf (5.42 GiB, qwen35 hybrid architecture)
+Target Device: NVIDIA GeForce RTX 3070 (7884 MiB total, c=8192 Full FP16, Flash Attention ON)
+CPU Drafting:  AMD Ryzen 7 7800X3D (Cores 4-7 isolated via vcache-run --profile infer)
+
+1. CUDA0 Memory Breakdown at Full c=8192 FP16 (common_memory_breakdown_print):
+   - Model Weights (CUDA0):    4861.00 MiB (+ 545.00 MiB Host embeddings)
+   - Context Cache (FP16/FP32): 306.25 MiB (256.00 MiB FP16 KV across 8 GQA layers + 50.25 MiB FP32 Recurrent SSM across 24 Gated DeltaNet layers)
+   - Compute Buffer (CUDA0):    112.02 MiB
+   - Total Inference VRAM:     5279.27 MiB (1987.00 MiB free VRAM headroom remaining)
+
+2. The 4-Core DDR5 Saturation Law (Dense 0.5B Q4_K_M = 462.96 MiB > 96 MB L3):
+   - 4 Cores (Cores 4-7, jemalloc + hugetlb): pp128 =  687.71 +-  1.44 t/s | tg64 = 154.53 +-  0.89 t/s (6.47 ms/tok)
+   - 8 Cores (Cores 0-7, jemalloc + hugetlb): pp128 = 1096.21 +- 35.20 t/s | tg64 = 131.17 +- 11.96 t/s (-15.1% drop, 13.4x jitter due to DDR5 bus saturation)
+
+3. Hybrid GPU + L3-Resident Zero-Weight Speculative Drafting (ngram-map-k4v,ngram-mod):
+   - L3 SRAM Drafting Footprint:  < 12.0 MiB (100% L3 resident, 0 DDR5 spills)
+   - Extra GPU VRAM Overhead:       0.0 MiB
+   - Pure GPU Baseline (Standard Thinking):      Prompt = 1784.0 t/s | Generation =  66.9 t/s
+   - Pure GPU Baseline (Direct Code Generation): Prompt = 1878.7 t/s | Generation =  65.0 t/s (1.00x)
+   - Hybrid GPU + L3 Speculative (Greenfield):   Prompt = 2075.6 t/s | Generation =  87.9 t/s (1.35x speedup, +35.2%)
+   - Hybrid GPU + L3 Speculative (Refactoring):  Prompt = 2396.1 t/s | Generation = 701.9 t/s (10.80x speedup, +979.8%)
+====================================================================

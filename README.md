@@ -1,204 +1,136 @@
-# ZEN 4 3D V-CACHE LOCAL AI ACCELERATION
-### Microarchitectural SRAM Residency & Zero-VRAM Speculative Drafting
+# zen-vcache-ai
 
-```
-Target CPU     : AMD Ryzen 7 7800X3D (8C/16T, Monolithic Zen 4 CCD)
-L3 Cache       : 96 MiB Unified SRAM (~11 ns latency | ~1.3 TB/s read bandwidth)
+**AMD Zen 4/5 3D V-Cache Local AI Acceleration, Hardware PMU Telemetry & Hybrid MoE Benchmarks**
+
+```text
+Target CPU     : AMD Ryzen 7 7800X3D (8C/8T BIOS SMT-Off, Monolithic Zen 4 CCD)
+L3 Cache       : 96 MiB Unified SRAM (32 MiB Base + 64 MiB 3D V-Cache | ~11 ns latency)
 Target GPU     : NVIDIA GeForce RTX 3070 (8 GB GDDR6, PCIe 4.0 x16)
-Platform       : Arch Linux (Linux 6.17+ / znver4 / AVX-512 VBMI + VNNI)
-Classification : Performance Specification & Reference Implementation
+Memory         : Dual-Channel DDR5-6000 (63.5 GB/s AVX-512 streaming read ceiling)
+Platform       : Arch Linux (Linux 6.17+ / znver4 / AVX-512 VBMI + VNNI + VPOPCNTDQ)
+License        : Apache-2.0 (see LICENSE and NOTICE)
 ```
 
 ---
 
-## 01. ARCHITECTURAL OVERVIEW & BOTTLENECK ANALYSIS
+## 01. Key Empirical Findings
 
-Desktop local inference on consumer-grade hardware faces two fundamental hardware boundaries:
+This repository consolidates our microarchitectural C/Python benchmark suite (`benchmarks/`, `results/`) and installable tooling (`bin/`, `src/vcache/`, `kernels/`) for running local AI workloads on consumer 8 GB VRAM + 96 MiB 3D V-Cache desktops.
 
-1. **VRAM Ceiling (8 GB Boundary):**
-   Standard neural speculative decoding requires a secondary draft model (0.5B–1.5B parameters), consuming 1.5–2.5 GB of VRAM. On an 8 GB frame buffer, co-locating target and draft models forces context truncation or PCIe host memory spilling.
-
-2. **DDR5 Memory Bus & Cache Hierarchy Bottlenecks:**
-   Dual-channel DDR5-6000 reaches measured sequential read bandwidth saturation at ~63.5 GB/s on Zen 4. For CPU-side token generation on models exceeding L3, scaling threads across cores is bounded by memory controller arbitration, while sub-1 GB models partially cache (~15–20% of weights) inside the 96 MiB L3 / 8 MiB L2 hierarchy.
-
-This repository implements microarchitectural evaluation and acceleration on the 7800X3D's stacked 64 MiB 3D V-Cache (96 MiB total L3 SRAM pool) for vector indexing, zero-DRAM ternary compute, and speculative drafting.
-
----
-
-## 02. MEMORY TOPOLOGY & RESIDENCY MAP
-
-```
-+-----------------------------------------------------------------------------+
-| AMD RYZEN 7 7800X3D (8-CORE MONOLITHIC CCD, UNIFIED 96 MiB L3)              |
-|                                                                             |
-|  [Cores 0-1] -> System Services / Desktop Compositor (Hyprland) / OS Sched   |
-|  [Cores 2-7] -> Isolated Compute / AVX-512 SIMD / Low-Latency Inference      |
-|                                                                             |
-|  +-----------------------------------------------------------------------+  |
-|  | 96 MiB UNIFIED L3 SRAM POOL (~11 ns latency | ~1.3 TB/s bandwidth)    |  |
-|  |                                                                       |  |
-|  |  Working Sets <= 64 MiB: Flat ~11 ns random access (with 2MB THP)     |  |
-|  |  - N-Gram Draft State Machine Footprint:       < 12.0 MiB             |  |
-|  |  - 1M Vector PQ64 FastScan Index:               61.04 MiB             |  |
-|  |  - Ternary LUT Weights (1.58-bit):              56.00 MiB             |  |
-|  +-----------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------+
-                                       |
-                     DDR5-6000 Interconnect (63.5 GB/s Measured Read Ceiling)
-                                       v
-+-----------------------------------------------------------------------------+
-| SYSTEM MEMORY (Target for Non-Temporal Cold Streams via _MM_HINT_NTA)       |
-+-----------------------------------------------------------------------------+
-```
+1. **The 64 MiB L3 Residency Ceiling & 2MB THP Requirement:**
+   With 2MB Transparent HugePages (`THP=always`), L3 random pointer-chase latency stays flat at **~11.0–11.6 ns** up to **64 MiB**. Above 64 MiB, dTLB misses and 16-way associative eviction push latency toward DRAM (~39.6 ns at 128 MiB).
+2. **8-Thread OpenMP AVX-512 Vector Scan Inside L3 (`<= 61 MiB`):**
+   Exhaustive 512-bit Hamming (`VPOPCNTDQ`) scans fit inside L3 up to 1,000,000 vectors (**61.04 MiB**) and scale cleanly across all 8 cores:
+   - **100k vectors (6.10 MiB):** `112.60 µs` (1T) → **`15.86 µs`** (8T, **63,051.7 QPS**, **375.82 GB/s**)
+   - **500k vectors (30.52 MiB):** `576.98 µs` (1T) → **`77.36 µs`** (8T, **12,926.2 QPS**, **385.23 GB/s**)
+   - **1M vectors (61.04 MiB):** `1,165.87 µs` (1T) → **`162.76 µs`** (8T, **6,143.9 QPS**, **366.21 GB/s**)
+3. **Hybrid MoE Offloading (8 GB VRAM + DDR5) — `6C (2-7)` + `--moe-cache-mib`:**
+   On a monolithic single-CCD 7800X3D, cores `4-7` have **no privileged L3 access** over `0-3`. Under desktop isolation (leaving cores `0-1` for OS/compositor), **6 cores (`2-7`)** is the sharp optimum for DDR5-spilling MoE experts, and caching hot experts in leftover VRAM via `--moe-cache-mib` pushes **35B MoE to 76.3 tok/s** on an 8 GB RTX 3070.
+4. **N-Gram Speculative Decoding vs. Untrained Micro-Draft (`SpecOPD` POC):**
+   Algorithmic N-Gram matching (`ngram-mod` / `ngram-simple`, 0 MiB extra VRAM) accelerates GPU-resident inference (**+19.6 %** to **4.53×** on warm code refactoring) independently of L3 capacity. Conversely, running an un-trained submatrix-distilled 12M `Q8_0` draft model (`draft-simple` on CPU) degrades throughput (`43.4–45.2 tok/s` vs `121.8 tok/s` baseline) due to low draft acceptance and 151k-vocab LM-head overhead.
 
 ---
 
-## 03. CORE SPECIFICATIONS
+## 02. Empirical Benchmarks
 
-### A. L3-Resident Speculative Drafting
-* **Subsystem:** Token prediction tree (`ngram-mod`, `ngram-map-k4v`) held within L3 SRAM budget (`<= 40 MiB`).
-* **Execution:** Host GPU runs primary weights in VRAM; CPU cores 4–7 evaluate n-gram matches at SRAM speeds.
-* **Overhead:** 0 MiB GPU VRAM allocation.
+### A. Hybrid GPU+CPU MoE Scaling: Core Count (`4C` vs `6C` vs `7C` vs `8C`)
 
-### B. Multi-Core Scaling & DDR5 Read Ceiling
-* **Architecture:** AMD Zen 4 single monolithic CCD with unified 96 MiB L3 cache across all 8 cores.
-* **Empirical Scaling:** On dense 463 MiB GGUF models (`Qwen2.5-Coder-0.5B-Q4_K_M`) under symmetric desktop isolation:
-  - 2 Cores: **97.2 ± 0.9 tok/s**
-  - 4 Cores: **152.7 ± 2.3 tok/s**
-  - 6 Cores: **173.5 ± 5.0 tok/s** (+13.6% over 4 cores)
-  - 8 Cores: **170.8 ± 43.7 tok/s** (higher variance due to OS background tasks)
-* **DDR5 Memory Bus Ceiling:** Measured AVX-512 streaming read bandwidth peaks at **63.5 GB/s** on dual-channel DDR5-6000. Implied weight bandwidth for 463 MiB models at 173.5 tok/s corresponds to 84.2 GB/s, proving that **~15–20% of weights remain resident in the 96 MiB L3 / 8 MiB L2 hierarchy** between decode steps.
+Measured via `llama-bench -ngl 99 -ot "\.ffn_.*_exps\.=CPU" -p 128 -n 64 -r 3` under `vcache-run`:
 
-### C. Sub-64MB Zero-DRAM Inference (AVX-512 VBMI `VPERMB`)
-* **Vector Kernel:** Quantized 1.58-bit ternary representations (`<= 56 MiB`) bypass system memory controllers entirely.
-* **Throughput:** Scales across all 8 cores to **10,700.4 tok/s** utilizing `_mm512_permutexvar_epi8` with `VPDPBUSD`.
-
-### D. Million-Scale Vector PQ64 FastScan
-* **Index Footprint:** 1,000,000 512-dimensional vectors compressed via Product Quantization (64 bytes/vector) occupying exactly **61.04 MiB**.
-* **Latency:** **102.2 µs** exhaustive brute-force scan; **2.55 µs** IVF Top-4096 rescoring.
-
-### E. Zen 4 Core PMU Hardware L3 Watchdog
-* **Subsystem:** Real-time hardware L3 miss-rate telemetry via Linux `perf_event_open` directly reading AMD Zen 4 Core PMU `LsDmndFillsFromSys` (Event `0x43`, `PERF_TYPE_RAW`).
-* **Counter Configuration:**
-  - `0x0243ULL` (`UMask 0x02`): Local CCX L3 Hits (demand requests fulfilled directly by 96 MiB 3D V-Cache).
-  - `0x0843ULL` (`UMask 0x08`): DRAM IO Near (demand requests that missed L3 and fetched from local DDR5 RAM).
-* **Deterministic Ratio:** $\text{L3 Miss Rate} = \frac{\text{dram\_fills}}{\text{l3\_hits} + \text{dram\_fills}}$. Verified via ctypes: 32 MiB resident buffer achieves 9.4% miss rate (cold starts/dTLB); 256 MiB spilling buffer triggers 23.8% miss rate.
-
----
-
-## 04. EMPIRICAL TELEMETRY
-
-Controlled microarchitectural benchmarks on Ryzen 7 7800X3D + RTX 3070 8GB ($n=10$, Median ± IQR):
-
-### 1. Hardware Cache Cliff & TLB Scaling (Pointer Chase, CPU 5)
-
-| Working Set | 2MB THP Enabled | THP + 64 MiB Thrasher | 4KB Pages (THP Disabled) | THP Off + 64 MiB Thrasher |
-| :--- | :---: | :---: | :---: | :---: |
-| **8 MiB** | 10.70 ± 0.23 ns | 11.36 ± 0.93 ns | 12.24 ± 0.11 ns | 16.34 ± 3.00 ns |
-| **16 MiB** | 10.95 ± 0.27 ns | 16.21 ± 10.01 ns | 14.00 ± 0.39 ns | 21.55 ± 3.20 ns |
-| **32 MiB** | 11.07 ± 0.28 ns | 29.51 ± 6.93 ns | 15.83 ± 0.06 ns | 38.52 ± 5.26 ns |
-| **48 MiB** | 11.32 ± 0.86 ns | 41.58 ± 3.50 ns | 17.46 ± 1.66 ns | 49.70 ± 1.45 ns |
-| **64 MiB** | **11.64 ± 4.26 ns** | 50.42 ± 1.13 ns | 20.11 ± 3.47 ns | 58.52 ± 2.08 ns |
-| **80 MiB** | 17.09 ± 8.17 ns | 55.41 ± 0.87 ns | 28.64 ± 1.38 ns | 62.85 ± 1.75 ns |
-| **96 MiB** | 27.33 ± 6.61 ns | 58.49 ± 1.06 ns | 33.68 ± 3.07 ns | 66.35 ± 1.26 ns |
-| **128 MiB (DRAM)** | 39.64 ± 2.52 ns | 61.79 ± 1.02 ns | 47.70 ± 2.07 ns | 70.64 ± 0.86 ns |
-
-*Key finding:* With 2MB HugePages, L3 random access latency remains completely flat (~11.0–11.6 ns) up to 64 MiB. The degradation above 64 MiB is driven by TLB miss costs and associative cache eviction, not by OS stack contention.
-
-### 2. CPU-Only Core Scaling (`Qwen2.5-Coder-0.5B-Q4_K_M`, 463 MiB)
-
-| Configuration | Pinned Cores | Active Threads | Generation (`tg64`) | Implied Bandwidth |
-| :--- | :---: | :---: | :---: | :---: |
-| **2 Cores** | `6-7` | 2 | 97.2 ± 0.9 tok/s | 47.2 GB/s |
-| **4 Cores (Pinned)** | `4-7` | 4 | 152.7 ± 2.3 tok/s | 74.1 GB/s |
-| **4 Cores (Unpinned)** | `2-7` | 4 | 154.0 ± 2.6 tok/s | 74.7 GB/s |
-| **6 Cores** | `2-7` | 6 | **173.5 ± 5.0 tok/s** | **84.2 GB/s** |
-| **8 Cores** | `0-7` | 8 | 170.8 ± 43.7 tok/s | 82.9 GB/s |
-
-*Key finding:* Core pinning in a single-CCD architecture produces identical throughput (`152.7` vs `154.0` tok/s). 6 cores outperform 4 cores by +13.6%.
-
-### 3. N-Gram Speculative Decoding Attribution (RTX 3070 8GB Target)
-
-| Workload | Phase | Mode | Clean L3 (T0) | 64 MiB Thrasher (T64) | Draft Accepted / Total |
+| Model | `4C (4-7)` `tg64` | `6C (2-7)` `tg64` | `7C (1-7)` `tg64` | `8C (0-7)` `tg64` | Optimal (`6C` vs `4C`) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Code Refactoring** | Warm | N-Gram Spec | **1992.4 ± 9.4 tok/s** | **1968.4 ± 12.7 tok/s** | 349 / 465 (75.1%) |
-| **Code Refactoring** | Warm | Baseline (No Spec) | 439.7 ± 9.1 tok/s | 440.7 ± 13.5 tok/s | — |
-| **Code Refactoring** | Cold | N-Gram Spec | 707.9 ± 3.6 tok/s | 708.6 ± 3.4 tok/s | 183 / 311 (58.8%) |
-| **Code Refactoring** | Cold | Baseline (No Spec) | 438.9 ± 5.2 tok/s | 439.1 ± 14.7 tok/s | — |
-| **Greenfield Code** | Cold | N-Gram Spec | 563.3 ± 3.0 tok/s | 565.8 ± 2.5 tok/s | 130 / 275 (47.3%) |
-| **Greenfield Code** | Cold | Baseline (No Spec) | 452.9 ± 3.4 tok/s | 454.4 ± 15.0 tok/s | — |
+| **Gemma 4 26B.A4B MXFP4 MoE** (`15.40 GiB`) | `38.18 ± 0.23 t/s` | **`40.54 ± 0.21 t/s`** | `38.69 ± 1.26 t/s` | `37.11 ± 1.33 t/s` | **+6.2 %** (`pp128`: **+9.2 %**) |
+| **Qwen 3.8 35B.A3B Q3_K_M** (`16.44 GiB`) | `59.45 ± 0.73 t/s` | **`64.97 ± 0.76 t/s`** | `63.14 ± 1.80 t/s` | `62.77 ± 2.92 t/s` | **+9.3 %** (`pp128`: **+4.5 %**) |
 
-*Key finding:* N-gram speedup is driven by algorithmic token matching and parallel GPU verification (4.53x on warm refactoring, 1.61x on cold refactoring). Evicting L3 via a concurrent 64 MiB thrasher causes only a **1.2% drop**, confirming that throughput is not bounded by L3 capacity. In `llama.cpp`, `--spec-draft-cpu-range` is a no-op for n-gram predictors.
+### B. VRAM Hot-Expert Cache (`--moe-cache-mib`) on 8 GB RTX 3070 (`6C 2-7`)
+
+Measured via `llama-cli -ngl 99 -t 6 -n 48..64`:
+
+| Model | `-ot` (All Experts CPU) | `--moe-cache-mib 2048` | `--moe-cache-mib 3072` | `--moe-cache-mib 4096` | `--moe-cache-mib 4608` |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Gemma 4 26B.A4B** (`c=8192, q8_0`) | `35.5 t/s` | `31.4 t/s` | **`40.1 t/s`** (+13.0 %) | OOM | OOM |
+| **Qwen 3.8 35B.A3B** (`c=4096`) | `60.8 t/s` | `55.5 t/s` | `63.1 t/s` | **`72.4 t/s`** (+19.1 %) | **`76.3 t/s`** (+25.5 %) |
+
+### C. Long-Context (`pp4096`) KV Cache Quantization (`Gemma 4 26B.A4B`, `6C`)
+
+| KV Cache (`K / V`) | `pp4096` | `tg64` | Notes |
+| :--- | :---: | :---: | :--- |
+| `f16 / f16` | `825.89 t/s` | `40.51 t/s` | Baseline precision |
+| **`q8_0 / q8_0`** | **`822.81 t/s`** | **`40.43 t/s`** | **~0 % speed penalty, 50 % KV VRAM** |
+| `q4_0 / q4_0` | `798.59 t/s` | `40.21 t/s` | -3.3 % prefill dequant overhead |
+
+### D. Unified L3 Sensitivity Test: Clean L3 vs. Concurrent 64 MiB Thrasher (Cores `0-1`)
+
+Testing all three workload classes against an active C memory thrasher evicting the shared 96 MiB L3:
+
+| Workload | Clean L3 | + 64 MiB L3 Thrasher | Impact |
+| :--- | :---: | :---: | :--- |
+| **16 MiB Buffer (`LsDmndFillsFromSys` PMU)** | `0.05 %` miss rate | `57.05 %` miss rate | **1,141× jump in L3 misses** |
+| **500k Vector Scan (`30.52 MiB`, 8T AVX-512)** | `80.86 µs` (`368.56 GB/s`) | `4,010.78 µs` (`7.43 GB/s`) | **49.6× slower** (L3-bound) |
+| **GPU N-Gram Speculative (`MiMo 9B` RTX 3070)** | `80.7 tok/s` | `78.4 tok/s` | **-2.8 %** (L3-insensitive) |
+
+### E. Speculative Drafting Attribution (`Qwen3-4B Q4_K_M`, `--reasoning-budget 0`)
+
+| Scenario | Baseline (`none`) | `ngram-mod` (0 MiB VRAM) | `SpecOPD 12M Q8_0` (`draft-simple`, CPU) |
+| :--- | :---: | :---: | :---: |
+| **Code Refactoring** | `121.8 tok/s` | **`127.3 tok/s`** | `43.4 tok/s` |
+| **Greenfield Rust** | `119.7 tok/s` | **`120.6 tok/s`** | `45.2 tok/s` |
+
+> **Note on `SpecOPD` (`src/vcache/specopd.py`, `kernels/l3_specopd_kernel.c`, `bin/vcache-distill-specopd`):**
+> The SpecOPD proposal-tree AVX-512 kernel, `LsDmndFillsFromSys` (`0x0243` / `0x0843`) hardware PMU watchdog, and GGUF distillation script are **standalone C/Python prototypes and unit-tested modules** — not an upstream `llama.cpp` training/integration patch. Without on-policy distillation training, submatrix truncation yields near-zero draft acceptance in `llama.cpp`.
+
+> **Note on BIOS SMT:** All measurements on the reference workstation were recorded with `SMT=Off` in UEFI/BIOS (`/sys/devices/system/cpu/smt/control` = `notsupported`).
 
 ---
 
-## 05. CLI SPECIFICATION & REPRODUCTION
+## 03. Repository Layout
 
-### Directory Layout
-
-```
-zen4-3d-vcache-exploit/
+```text
+zen-vcache-ai/
 ├── bin/
-│   ├── vcache-run               # Core affinity and memory topology wrapper
-│   └── vcache-spec-bench        # Empirical benchmark harness
+│   ├── vcache-run               # Unprivileged CPU affinity + jemalloc + hugetlb wrapper
+│   ├── vcache-spec-bench        # Speculative decoding benchmark CLI
+│   └── vcache-distill-specopd   # Prototype Qwen3 12M Q8_0 micro-draft GGUF extractor
 ├── src/vcache/
-│   ├── __init__.py              # Public Python package interface
-│   ├── benchmark.py             # Benchmark harness & multi-run engine
-│   ├── specopd.py               # Proposal-tree engine & Zen 4 L3 PMU watchdog
-│   ├── topology.py              # L3 cache sysfs inspector & affinity resolver
-│   └── vector.py                # AVX-512 ctypes bindings & vector benchmark
+│   ├── topology.py              # Sysfs L3 3D V-Cache & AVX-512 flag inspector
+│   ├── vector.py                # ctypes wrapper for OpenMP AVX-512 vector kernels
+│   ├── specopd.py               # ProposalTree, E2E-TV, and Zen 4 PMU L3CacheWatchdog
+│   └── benchmark.py             # llama-cli speculative benchmark harness
 ├── kernels/
-│   ├── l3_specopd_kernel.c      # AVX-512 tree attention & Zen 4 Core PMU watchdog
-│   ├── l3_vector_kernel.c       # AVX-512 VPOPCNTDQ / VBMI L3 vector engine
-│   └── Makefile                 # znver4 optimized compiler targets
-├── tests/
-│   ├── test_benchmark.py        # Metric parsing & vector engine unit tests
-│   ├── test_specopd.py          # Tree masks, E2E-TV, budget & watchdog tests
-│   └── test_topology.py         # CPU topology & L3 sysfs unit tests
+│   ├── l3_vector_kernel.c       # OpenMP AVX-512 VPOPCNTDQ / INT8 vector search
+│   ├── l3_specopd_kernel.c      # AVX-512 tree attention, CLFLUSHOPT sanitizer & PMU watchdog
+│   └── Makefile                 # -O3 -march=znver4 -fopenmp shared library build
+├── benchmarks/                  # Standalone C/Python L3 & DDR5 microbenchmarks (1–13)
+├── examples/                    # Lockless /dev/shm IPC & Zstd L2/L3 stream examples
+├── results/                     # Saved raw outputs from Benchmarks 1–13
+├── tests/                       # Unit tests (topology, vector, specopd, benchmark)
+├── reproduce.sh                 # Automated C/Python microbenchmark reproduction script
 ├── pyproject.toml
-├── .gitignore
+├── CITATION.cff
 ├── LICENSE
-├── NOTICE
-└── README.md
+└── NOTICE
 ```
 
-### Execution Commands
+---
+
+## 04. Quick Start & Verification
 
 ```bash
-# Build native AVX-512 and Core PMU watchdog library (libl3_vector.so)
+# 1. Build OpenMP AVX-512 + Zen 4 PMU shared library
 make -C kernels
 
-# Execute complete speculative decoding benchmark suite
-./bin/vcache-spec-bench --scenario all
+# 2. Run unit tests
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 
-# Export raw metrics for telemetry ingestion (JSON or CSV)
-./bin/vcache-spec-bench --scenario refactor --format json
-
-# Run in-L3 AVX-512 vector scan benchmark (10k, 100k, 500k vectors)
-PYTHONPATH=src python3 -m vcache.vector
-
-# Inspect CPU cache hierarchy and recommended pinning
+# 3. Inspect CPU topology, L3 cache domains, and AVX-512 flags
 PYTHONPATH=src python3 -m vcache.topology
 
-# Run unit tests
-PYTHONPATH=src python3 -m unittest discover -s tests
+# 4. Run 1T vs 8T AVX-512 L3 vector scan benchmark (100k, 500k, 1M vectors)
+PYTHONPATH=src python3 -m vcache.vector
 
-# Run hybrid GPU + CPU N-Gram speculative decoding
-./bin/vcache-run --profile infer -- llama-cli -m target_model.gguf -ngl 99 \
-  --spec-type ngram-map-k4v,ngram-mod \
-  --draft-max 16 --draft-min 2
+# 5. Launch hybrid MoE inference pinned to optimal 6 cores (2-7) with jemalloc + hugetlb
+./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+
+# 6. Reproduce standalone C/Python microbenchmarks (1–13)
+./reproduce.sh
 ```
-
----
-
-## 06. SYSTEM COMPATIBILITY
-
-* **Processor:** AMD Zen 4 X3D Series (7800X3D monolithic CCD verified; 7900X3D/7950X3D requires dual-CCD cache-core pinning).
-* **Instruction Sets:** AVX-512F, AVX-512BW, AVX-512DQ, AVX-512VL, AVX-512VPOPCNTDQ, AVX-512VNNI, AVX-512VBMI.
-* **Libraries:** `glibc >= 2.38`, `jemalloc >= 5.3`.
-
----
-
-## LICENSE
-
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.

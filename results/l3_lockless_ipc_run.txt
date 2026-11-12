@@ -1,0 +1,22 @@
+====================================================================
+ AMD Zen 4 3D V-Cache Lockless Ring-Buffer IPC (/dev/shm) Benchmark
+====================================================================
+Ring Configuration: 65536 slots x 128 B = 8.00 MiB (L3 SRAM Resident)
+Topology: Producer pinned to Core 0 | Consumer pinned to Core 4
+
+Benchmark 1 // L3 Lockless Ring-Buffer IPC (/dev/shm, Core 0 -> Core 4):
+  One-way coherency latency (RTT/2): 34.74 ns (RTT: 69.47 ns)
+  Sustained pipelined handoff latency: 2.48 ns / message
+  Throughput: 402.89 million messages/sec (48.03 GB/s at 128B slot)
+  Checksum integrity: 1000000 / 1000000 messages verified (100.0%)
+
+Benchmark 2 // Traditional IPC Baselines (Core 0 <-> Core 4):
+  Kernel AF_UNIX socketpair one-way: 2464.95 ns (993.1x slower than L3 ring)
+  Subprocess fork+wait overhead:     78967.98 ns (78.97 us, 31816x slower)
+
+Benchmark 3 // Consumer SIGKILL Crash Resilience & Leak Audit:
+  Consumer 1 terminated via SIGKILL at msg: 10000 (sigkill_verified=true)
+  Producer deadlock count:                  0 (non-blocking L3 ring)
+  Recovery consumer drained & verified:     40000 / 40000 messages (100.0%)
+  /dev/shm cleanup verified (zero leaks):   PASSED (ENOENT after shm_unlink)
+====================================================================
