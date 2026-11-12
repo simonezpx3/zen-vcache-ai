@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""CLI entrypoint for On-Policy SpecOPD Micro-Draft training (d64 / d128)."""
+
+import argparse
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+VENV_PY = ROOT / ".venv/bin/python"
+if VENV_PY.exists() and Path(sys.executable).resolve() != VENV_PY.resolve():
+    import os
+
+    os.execv(str(VENV_PY), [str(VENV_PY), __file__, *sys.argv[1:]])
+
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from vcache.train_specopd import TrainConfig, run_training
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train On-Policy SpecOPD Qwen3 Micro-Draft models (d64 / d128).")
+    parser.add_argument(
+        "--teacher",
+        type=Path,
+        default=Path.home() / "models/qwen3-4b/qwen3-4b-heretic-Q4_K_M.gguf",
+        help="Path to Qwen3 teacher GGUF model",
+    )
+    parser.add_argument(
+        "--arch",
+        nargs="+",
+        choices=["d64", "d128"],
+        default=["d64", "d128"],
+        help="Student draft architectures to train",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path.home() / "models/qwen3-4b",
+        help="Directory for exported trained GGUF draft models",
+    )
+    parser.add_argument(
+        "--rollout-cache",
+        type=Path,
+        default=Path.home() / "Ai-temp/specopd_teacher_rollouts.jsonl",
+        help="JSONL cache path for teacher rollouts",
+    )
+    parser.add_argument("--epochs", type=int, default=45, help="Stage 1 Forward Top-K KD epochs")
+    parser.add_argument("--rounds", type=int, default=3, help="Stage 2 On-Policy SpecOPD rounds")
+    parser.add_argument("--branches", type=int, default=64, help="On-policy student branches per round")
+    args = parser.parse_args()
+
+    cfg = TrainConfig(
+        teacher_gguf=args.teacher,
+        output_dir=args.output_dir,
+        stage1_epochs=args.epochs,
+        stage2_rounds=args.rounds,
+        stage2_branches=args.branches,
+    )
+    run_training(args.arch, cfg, args.rollout_cache)
+
+
+if __name__ == "__main__":
+    main()

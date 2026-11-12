@@ -26,8 +26,8 @@ This repository consolidates our microarchitectural C/Python benchmark suite (`b
    - **1M vectors (61.04 MiB):** `1,165.87 µs` (1T) → **`162.76 µs`** (8T, **6,143.9 QPS**, **366.21 GB/s**)
 3. **Hybrid MoE Offloading (8 GB VRAM + DDR5) — `6C (2-7)` + `--moe-cache-mib`:**
    On a monolithic single-CCD 7800X3D, cores `4-7` have **no privileged L3 access** over `0-3`. Under desktop isolation (leaving cores `0-1` for OS/compositor), **6 cores (`2-7`)** is the sharp optimum for DDR5-spilling MoE experts, and caching hot experts in leftover VRAM via `--moe-cache-mib` pushes **35B MoE to 76.3 tok/s** on an 8 GB RTX 3070.
-4. **N-Gram Speculative Decoding vs. Untrained Micro-Draft (`SpecOPD` POC):**
-   Algorithmic N-Gram matching (`ngram-mod` / `ngram-simple`, 0 MiB extra VRAM) accelerates GPU-resident inference (**+19.6 %** to **4.53×** on warm code refactoring) independently of L3 capacity. Conversely, running an un-trained submatrix-distilled 12M `Q8_0` draft model (`draft-simple` on CPU) degrades throughput (`43.4–45.2 tok/s` vs `121.8 tok/s` baseline) due to low draft acceptance and 151k-vocab LM-head overhead.
+4. **N-Gram Speculative Decoding vs. On-Policy Micro-Draft (`SpecOPD` `d64`/`d128`):**
+   Algorithmic N-Gram matching (`ngram-mod` / `ngram-simple`, 0 MiB extra VRAM) accelerates repetitive GPU-resident workflows (`+19.6 %` to `4.53×` on warm code refactoring) independently of L3 capacity. Running standalone Qwen3 micro-drafts (`d64`: `10.02 M`, `15.81 MiB`; `d128`: `20.63 M`, `26.56 MiB` Q8_0) inside the 96 MiB 3D V-Cache executes faster on 6 CPU cores (`5,042` / `4,140 tok/s`) than on the RTX 3070 (`3,235` / `3,466 tok/s`). After PyTorch On-Policy SpecOPD training (`122` rollouts, `17,129` tokens), out-of-sample `llama-speculative` acceptance rises from `0.00 %` to `5.00 %` (`d64`) and `13.10 %` (`d128`, `101.2 tok/s` on refactoring), yet remains below the ~45–60 % breakeven required to beat a fast `122 tok/s` `Qwen3-4B` GPU baseline without multi-million-token distillation or EAGLE-style hidden-state reuse.
 
 ---
 
@@ -71,13 +71,38 @@ Testing all three workload classes against an active C memory thrasher evicting 
 
 ### E. Speculative Drafting Attribution (`Qwen3-4B Q4_K_M`, `--reasoning-budget 0`)
 
-| Scenario | Baseline (`none`) | `ngram-mod` (0 MiB VRAM) | `SpecOPD 12M Q8_0` (`draft-simple`, CPU) |
+| Scenario | Baseline (`none`) | `ngram-mod` (0 MiB VRAM) | Untrained `12M` (`draft-simple`, CPU) |
 | :--- | :---: | :---: | :---: |
 | **Code Refactoring** | `121.8 tok/s` | **`127.3 tok/s`** | `43.4 tok/s` |
 | **Greenfield Rust** | `119.7 tok/s` | **`120.6 tok/s`** | `45.2 tok/s` |
 
-> **Note on `SpecOPD` (`src/vcache/specopd.py`, `kernels/l3_specopd_kernel.c`, `bin/vcache-distill-specopd`):**
-> The SpecOPD proposal-tree AVX-512 kernel, `LsDmndFillsFromSys` (`0x0243` / `0x0843`) hardware PMU watchdog, and GGUF distillation script are **standalone C/Python prototypes and unit-tested modules** — not an upstream `llama.cpp` training/integration patch. Without on-policy distillation training, submatrix truncation yields near-zero draft acceptance in `llama.cpp`.
+### F. On-Policy SpecOPD PyTorch Training (`d64` `10.02 M` vs. `d128` `20.63 M` Q8_0)
+
+Trained via [`vcache-train-specopd`](bin/vcache-train-specopd) on `122` on-policy rollouts (`17,129` tokens from `Qwen3-4B Q4_K_M`, 50 training prompts strictly disjoint from evaluation prompts) using GPU-PCA tied embeddings, Stage 1 Top-K Forward KD (`45` epochs), and gradient-accumulated Stage 2 Reverse-KL On-Policy SpecOPD (`accum=16`, damped LR):
+
+1. **Standalone Micro-Draft Roofline (`llama-bench`, `vcache-run -c 2-7 -p 64 -n 128 -r 3`):**
+
+| Micro-Draft | Params / File | CPU 6C (`-ngl 0`) `tg128` | GPU RTX 3070 (`-ngl 99`) `tg128` | Winner |
+| :--- | :---: | :---: | :---: | :--- |
+| **`d64` (`L=4, d=64`)** | `10.02 M` / `15.81 MiB` | **`5,042.37 ± 29.03 tok/s`** (`0.20 ms/tok`) | `3,234.52 ± 94.03 tok/s` | **CPU 3D V-Cache (+55.9 %)** |
+| **`d128` (`L=4, d=128`)** | `20.63 M` / `26.56 MiB` | **`4,140.33 ± 85.54 tok/s`** (`0.24 ms/tok`) | `3,466.42 ± 44.81 tok/s` | **CPU 3D V-Cache (+19.4 %)** |
+
+2. **Training Convergence & Out-of-Sample `llama-speculative` vs. `Qwen3-4B Q4_K_M` (`n_max=4`, `n=96`):**
+
+| Model / Mode | Stage 1 `top1_acc` | Stage 2 `prefix_accept` (train) | Refactor (OOS `accept` / `tok/s`) | Chat Rust (OOS `accept` / `tok/s`) | Greenfield (OOS `accept` / `tok/s`) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Baseline (`none`, GPU)** | — | — | `—` / **`122.0 tok/s`** | `—` / **`121.8 tok/s`** | `—` / **`121.4 tok/s`** |
+| **Trained `d64` (`ngld=0` CPU)** | `95.84 %` | `85.94 %` (`5.16/6`) | `5.00 %` / `76.8 tok/s` | `1.97 %` / `68.7 tok/s` | `0.26 %` / `62.5 tok/s` |
+| **Trained `d128` (`ngld=0` CPU)** | `96.53 %` | `89.32 %` (`5.36/6`) | `12.50 %` / `87.9 tok/s` (`94.2` @ `n_max=8`) | `5.77 %` / `81.6 tok/s` | `0.81 %` / `65.5 tok/s` |
+| **Trained `d128` (`ngld=99` GPU)** | `96.53 %` | `89.32 %` (`5.36/6`) | **`13.10 %`** / **`101.2 tok/s`** | `5.77 %` / `80.3 tok/s` | `3.57 %` / `76.4 tok/s` |
+
+> **Key Takeaways:**
+> - **V-Cache Speed Ceiling Verified:** Disproving the 151k LM-head CPU bottleneck hypothesis, both `d64` and `d128` stay within the 96 MiB L3 and run faster on 6 Ryzen 7800X3D cores than on RTX 3070 CUDA. Even a 100 %-accept `d64` self-draft benchmark (`llama-speculative`) scores `1,784.3 tok/s` on CPU vs. `1,467.9 tok/s` on GPU (`+21.6 %`).
+> - **Generalization Bottleneck vs. Training Scale:** While On-Policy SpecOPD clearly transfers to GGUF (lifting `d128` refactoring throughput from `43.4` to `87.9–101.2 tok/s`), `17,129` teacher tokens overfitted a `10M–21M` standalone backbone (`89.3 %` in-distribution vs. `0.8–13.1 %` out-of-sample), leaving net throughput below the `122 tok/s` GPU `Qwen3-4B` baseline.
+> - **Cross-Model Tokenizer Trap:** Cross-drafting onto `DeepSeek-R1-0528-Qwen3-8B` (`75.2–76.0 tok/s`) fails `llama-speculative` validation (`vocab=151936`, but token `151643` differs: `<｜begin▁of▁sentence｜>` vs. `<|endoftext|>`).
+
+> **Note on `SpecOPD` C/Python Runtime Modules (`src/vcache/specopd.py`, `kernels/l3_specopd_kernel.c`):**
+> The SpecOPD proposal-tree AVX-512 kernel and `LsDmndFillsFromSys` (`0x0243` / `0x0843`) hardware PMU watchdog are standalone C/Python prototypes and unit-tested modules alongside the PyTorch On-Policy SpecOPD trainer (`src/vcache/qwen3_draft.py`, `src/vcache/train_specopd.py`).
 
 > **Note on BIOS SMT:** All measurements on the reference workstation were recorded with `SMT=Off` in UEFI/BIOS (`/sys/devices/system/cpu/smt/control` = `notsupported`).
 
@@ -90,11 +115,15 @@ zen-vcache-ai/
 ├── bin/
 │   ├── vcache-run               # Unprivileged CPU affinity + jemalloc + hugetlb wrapper
 │   ├── vcache-spec-bench        # Speculative decoding benchmark CLI
-│   └── vcache-distill-specopd   # Prototype Qwen3 12M Q8_0 micro-draft GGUF extractor
+│   ├── vcache-distill-specopd   # Prototype Qwen3 12M Q8_0 micro-draft GGUF extractor
+│   └── vcache-train-specopd     # On-Policy SpecOPD PyTorch trainer & GGUF Q8_0 exporter
 ├── src/vcache/
 │   ├── topology.py              # Sysfs L3 3D V-Cache & AVX-512 flag inspector
 │   ├── vector.py                # ctypes wrapper for OpenMP AVX-512 vector kernels
 │   ├── specopd.py               # ProposalTree, E2E-TV, and Zen 4 PMU L3CacheWatchdog
+│   ├── qwen3_draft.py           # Pure PyTorch Qwen3 micro-draft (d64/d128) + GGUF exporter
+│   ├── prompts_specopd.py       # 50 training prompts disjoint from benchmark evals
+│   ├── train_specopd.py         # LlamaTeacherClient, Top-K KD Stage 1 & Reverse-KL Stage 2
 │   └── benchmark.py             # llama-cli speculative benchmark harness
 ├── kernels/
 │   ├── l3_vector_kernel.c       # OpenMP AVX-512 VPOPCNTDQ / INT8 vector search
