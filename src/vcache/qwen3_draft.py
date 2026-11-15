@@ -57,6 +57,17 @@ class Qwen3DraftConfig:
                 n_head_kv=2,
                 head_dim=64,
             )
+        if arch == "d192":
+            return cls(
+                name="Qwen3-SpecOPD-d192",
+                vocab_size=vocab_size,
+                n_layer=4,
+                n_embd=192,
+                n_ff=768,
+                n_head=4,
+                n_head_kv=2,
+                head_dim=64,
+            )
         raise ValueError(f"Unsupported draft preset: {arch}")
 
 
@@ -204,6 +215,41 @@ class Qwen3MicroDraft(nn.Module):
         return seq
 
 
+def _copy_teacher_tokenizer(reader: gguf.GGUFReader, writer: gguf.GGUFWriter, vocab_size: int) -> None:
+    """Clone the teacher tokenizer byte-exactly so llama.cpp accepts the draft for speculative decoding.
+
+    llama.cpp's draft compatibility check compares vocab type, BOS/EOS ids, add_bos/add_eos flags and
+    every token string, so model/pre and special-token metadata come from the teacher (DeepSeek-R1-Qwen3
+    and Qwen3 differ in 4 special tokens) and tokens/merges are copied as raw bytes, never re-decoded.
+    """
+
+    def raw_strings(key: str) -> list[bytes]:
+        field = reader.get_field(key)
+        return [bytes(field.parts[i]) for i in field.data]
+
+    tokens = raw_strings("tokenizer.ggml.tokens")
+    if len(tokens) != vocab_size:
+        raise ValueError(f"Teacher vocab has {len(tokens)} tokens but draft vocab_size={vocab_size}")
+
+    writer.add_tokenizer_model(bytes(reader.get_field("tokenizer.ggml.model").parts[-1]).decode())
+    pre_field = reader.get_field("tokenizer.ggml.pre")
+    if pre_field is not None:
+        writer.add_tokenizer_pre(bytes(pre_field.parts[-1]).decode())
+    writer.add_token_list(tokens)
+    writer.add_token_types([int(t) for t in reader.get_field("tokenizer.ggml.token_type").contents()])
+    if reader.get_field("tokenizer.ggml.merges") is not None:
+        writer.add_token_merges(raw_strings("tokenizer.ggml.merges"))
+
+    for key in ("bos_token_id", "eos_token_id", "padding_token_id", "unknown_token_id", "eot_token_id"):
+        field = reader.get_field(f"tokenizer.ggml.{key}")
+        if field is not None:
+            writer.add_uint32(f"tokenizer.ggml.{key}", int(field.contents()))
+    for key in ("add_bos_token", "add_eos_token"):
+        field = reader.get_field(f"tokenizer.ggml.{key}")
+        if field is not None:
+            writer.add_bool(f"tokenizer.ggml.{key}", bool(field.contents()))
+
+
 def export_to_gguf_q8(model: Qwen3MicroDraft, teacher_gguf: Path, output_path: Path) -> Path:
     """Export trained PyTorch Qwen3MicroDraft to llama.cpp-compatible Q8_0 GGUF."""
     cfg = model.cfg
@@ -224,21 +270,7 @@ def export_to_gguf_q8(model: Qwen3MicroDraft, teacher_gguf: Path, output_path: P
     writer.add_file_type(gguf.LlamaFileType.MOSTLY_Q8_0)
     writer.add_quantization_version(2)
 
-    tokens_field = reader.get_field("tokenizer.ggml.tokens")
-    tokens = [bytes(tokens_field.parts[i]).decode("utf-8", errors="replace") for i in tokens_field.data]
-    token_types = [int(t) for t in reader.get_field("tokenizer.ggml.token_type").contents()]
-    merges_field = reader.get_field("tokenizer.ggml.merges")
-    merges = [bytes(merges_field.parts[i]).decode("utf-8", errors="replace") for i in merges_field.data]
-
-    writer.add_tokenizer_model("gpt2")
-    writer.add_tokenizer_pre("qwen2")
-    writer.add_token_list(tokens)
-    writer.add_token_types(token_types)
-    writer.add_token_merges(merges)
-    writer.add_bos_token_id(int(reader.get_field("tokenizer.ggml.bos_token_id").contents()))
-    writer.add_eos_token_id(int(reader.get_field("tokenizer.ggml.eos_token_id").contents()))
-    writer.add_pad_token_id(int(reader.get_field("tokenizer.ggml.padding_token_id").contents()))
-    writer.add_add_bos_token(bool(reader.get_field("tokenizer.ggml.add_bos_token").contents()))
+    _copy_teacher_tokenizer(reader, writer, cfg.vocab_size)
 
     def add_f32(name: str, tensor: torch.Tensor) -> None:
         writer.add_tensor(name, tensor.detach().float().cpu().numpy(), raw_dtype=gguf.GGMLQuantizationType.F32)

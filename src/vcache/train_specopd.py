@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gc
 import json
+import os
 import random
 import socket
 import subprocess
@@ -37,7 +38,11 @@ class TrainConfig:
     branch_len: int = 6
     batch_size: int = 8
     lr: float = 2e-3
+    weight_decay: float = 0.01
     seed: int = 42
+    expanded_corpus: bool = False
+    prompt_style: str = "qwen3"
+    output_tag: str | None = None
 
 
 class LlamaTeacherClient:
@@ -56,7 +61,7 @@ class LlamaTeacherClient:
 
     def __enter__(self) -> Self:
         cmd = [
-            str(Path.home() / ".local/share/lfm3/bin/llama-server"),
+            os.environ.get("VCACHE_LLAMA_SERVER", str(Path.home() / ".local/share/lfm3/bin/llama-server")),
             "-m", str(self.teacher_gguf),
             "-ngl", "99",
             "-c", str(self.ctx_size),
@@ -155,21 +160,40 @@ class LlamaTeacherClient:
         return [int(x["id"]) for x in tops], [float(x["logprob"]) for x in tops]
 
 
+def _rollout_cache_key(cfg: TrainConfig) -> dict:
+    """Identity of a rollout corpus; a cache recorded for another teacher/template must never be reused."""
+    return {
+        "teacher": cfg.teacher_gguf.name,
+        "prompt_style": cfg.prompt_style,
+        "expanded_corpus": cfg.expanded_corpus,
+        "max_predict": cfg.max_predict,
+        "top_k": cfg.top_k,
+        "seed": cfg.seed,
+    }
+
+
 def collect_teacher_rollouts(cfg: TrainConfig, cache_path: Path) -> list[dict]:
     """Collect and cache teacher trajectories + top-K logprobs via llama-server."""
+    key = _rollout_cache_key(cfg)
+    meta_path = cache_path.with_name(cache_path.name + ".meta.json")
     if cache_path.exists():
-        records = [json.loads(line) for line in cache_path.read_text().splitlines() if line.strip()]
-        if records:
-            print(f"SpecOPD // Loaded {len(records)} cached rollouts from {cache_path}")
-            return records
+        cached_key = json.loads(meta_path.read_text()) if meta_path.exists() else None
+        if cached_key == key:
+            records = [json.loads(line) for line in cache_path.read_text().splitlines() if line.strip()]
+            if records:
+                print(f"SpecOPD // Loaded {len(records)} cached rollouts from {cache_path}")
+                return records
+        else:
+            print(f"SpecOPD // Ignoring stale rollout cache {cache_path} (key {cached_key} != {key})")
 
-    prompts = build_training_prompts()
+    prompts = build_training_prompts(expanded=cfg.expanded_corpus, style=cfg.prompt_style)
+    temp_schedule = [(0.0, 1), (0.7, 101), (0.8, 202)]
     records: list[dict] = []
     t0 = time.perf_counter()
     with LlamaTeacherClient(cfg.teacher_gguf, port=cfg.port) as client:
         for idx, p_text in enumerate(prompts):
             p_toks = client.tokenize(p_text)
-            for run_i, (temp, seed_off) in enumerate([(0.0, 1), (0.7, 101), (0.8, 202)]):
+            for run_i, (temp, seed_off) in enumerate(temp_schedule):
                 rec = client.rollout_with_logprobs(
                     p_toks, cfg.max_predict, temp=temp, n_probs=cfg.top_k, seed=cfg.seed + idx * 10 + seed_off
                 )
@@ -183,6 +207,8 @@ def collect_teacher_rollouts(cfg: TrainConfig, cache_path: Path) -> list[dict]:
     with cache_path.open("w") as f:
         for r in records:
             f.write(json.dumps(r) + "\n")
+    meta_path.write_text(json.dumps(key))
+    print(f"SpecOPD // Corpus: {len(records)} rollouts, {sum(len(r['gen']) for r in records)} teacher tokens")
     return records
 
 
@@ -233,7 +259,7 @@ def train_stage1_forward_kd(
     other_params = [p for n, p in model.named_parameters() if n != "token_embd.weight"]
     opt = torch.optim.AdamW(
         [{"params": other_params, "lr": cfg.lr}, {"params": embd_params, "lr": cfg.lr * 0.5}],
-        weight_decay=0.01,
+        weight_decay=cfg.weight_decay,
     )
     rng = random.Random(cfg.seed)
     steps_per_epoch = max(1, (len(records) + cfg.batch_size - 1) // cfg.batch_size)
@@ -273,6 +299,11 @@ def train_stage1_forward_kd(
                 total_tokens += n
 
         print(f"  [Stage 1 | {model.cfg.name}] epoch {epoch + 1:02d}/{cfg.stage1_epochs} loss={total_loss / total_tokens:.4f} top1_acc={100.0 * total_top1 / total_tokens:.2f}%")
+
+    del opt, sched
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def train_stage2_on_policy(
@@ -408,7 +439,8 @@ def run_training(arches: list[str], cfg: TrainConfig, cache_path: Path) -> list[
         model.warm_start_embedding_pca(cfg.teacher_gguf, device)
         train_stage1_forward_kd(model, records, cfg, device)
         train_stage2_on_policy(model, records, cfg, device)
-        out_gguf = cfg.output_dir / f"qwen3-specopd-{arch}-trained-q8_0.gguf"
+        tag = cfg.output_tag or "trained"
+        out_gguf = cfg.output_dir / f"qwen3-specopd-{arch}-{tag}-q8_0.gguf"
         export_to_gguf_q8(model, cfg.teacher_gguf, out_gguf)
         size_mib = out_gguf.stat().st_size / (1024 * 1024)
         print(f"SpecOPD // Exported {out_gguf} ({size_mib:.2f} MiB)")

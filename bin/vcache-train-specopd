@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for On-Policy SpecOPD Micro-Draft training (d64 / d128)."""
+"""CLI entrypoint for On-Policy SpecOPD Micro-Draft training (d64 / d128 / d192)."""
 
 import argparse
 import sys
@@ -20,7 +20,7 @@ from vcache.train_specopd import TrainConfig, run_training
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train On-Policy SpecOPD Qwen3 Micro-Draft models (d64 / d128).")
+    parser = argparse.ArgumentParser(description="Train On-Policy SpecOPD Qwen3 Micro-Draft models (d64 / d128 / d192).")
     parser.add_argument(
         "--teacher",
         type=Path,
@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument(
         "--arch",
         nargs="+",
-        choices=["d64", "d128"],
+        choices=["d64", "d128", "d192"],
         default=["d64", "d128"],
         help="Student draft architectures to train",
     )
@@ -46,9 +46,16 @@ def main() -> None:
         default=Path.home() / "Ai-temp/specopd_teacher_rollouts.jsonl",
         help="JSONL cache path for teacher rollouts",
     )
+    parser.add_argument("--tag", type=str, default=None, help="Optional filename suffix replacing 'trained'")
+    parser.add_argument("--style", choices=["qwen3", "deepseek"], default="qwen3", help="Prompt chat template style")
+    parser.add_argument("--expanded", action="store_true", help="Use expanded (~150 prompt) rollout suite")
     parser.add_argument("--epochs", type=int, default=45, help="Stage 1 Forward Top-K KD epochs")
     parser.add_argument("--rounds", type=int, default=3, help="Stage 2 On-Policy SpecOPD rounds")
     parser.add_argument("--branches", type=int, default=64, help="On-policy student branches per round")
+    parser.add_argument("--batch-size", type=int, default=8, help="Stage 1 training batch size")
+    parser.add_argument("--max-predict", type=int, default=144, help="Max rollout tokens per prompt")
+    parser.add_argument("--lr", type=float, default=2e-3, help="Stage 1 base learning rate")
+    parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW weight decay")
     args = parser.parse_args()
 
     cfg = TrainConfig(
@@ -57,6 +64,13 @@ def main() -> None:
         stage1_epochs=args.epochs,
         stage2_rounds=args.rounds,
         stage2_branches=args.branches,
+        batch_size=args.batch_size,
+        max_predict=args.max_predict,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        expanded_corpus=args.expanded,
+        prompt_style=args.style,
+        output_tag=args.tag,
     )
     run_training(args.arch, cfg, args.rollout_cache)
 
