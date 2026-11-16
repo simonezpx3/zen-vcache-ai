@@ -15,18 +15,18 @@
 ========================================================================================================
 WORKLOAD PROFILE           | BASELINE (NO SPEC) | UNPINNED 8C SMT  | L3 PINNED (4C)  | SPEEDUP  | VRAM Δ  
 ========================================================================================================
-refactor                   | 0.0 tok/s          | 0.0 tok/s        | 0.0 tok/s       | 0.00x    | 0 MiB   
-boilerplate                | 0.0 tok/s          | 0.0 tok/s        | 0.0 tok/s       | 0.00x    | 0 MiB   
-greenfield                 | 0.0 tok/s          | 0.0 tok/s        | 0.0 tok/s       | 0.00x    | 0 MiB   
+refactor                   | 68.2 tok/s         | 80.6 tok/s       | 80.9 tok/s      | 1.19x    | 0 MiB   
+boilerplate                | 68.0 tok/s         | 67.4 tok/s       | 68.6 tok/s      | 1.01x    | 0 MiB   
+greenfield                 | 69.0 tok/s         | 69.3 tok/s       | 69.4 tok/s      | 1.01x    | 0 MiB   
 ========================================================================================================
 --- arci-kb L3 search ---
 
-[1m󰚩 Nalezeno 10 záznamů v databázi arci-kb:[0m
+󰚩 Nalezeno 10 záznamů v databázi arci-kb:
 
- [1m[poz-využití-3d-v-cache-ryzen-7800x3d-pro-ai-88-akcelerace-hnsw-vekto][0m [36m[POZNATEK][0m [1mVyužití 3D V-Cache (Ryzen 7800X3D) pro AI: +88% akcelerace HNSW vektorového vyhledávání a RAG[0m
-   [2mTagy: 3d-vcache,ryzen-7800x3d,rag,hnsw,vector-search,qdrant,milvus,llm | Aktualizováno: 2026-10-09[0m
+ [poz-využití-3d-v-cache-ryzen-7800x3d-pro-ai-88-akcelerace-hnsw-vekto] [POZNATEK] Využití 3D V-Cache (Ryzen 7800X3D) pro AI: +88% akcelerace HNSW vektorového vyhledávání a RAG
+   Tagy: 3d-vcache,ryzen-7800x3d,rag,hnsw,vector-search,qdrant,milvus,llm | Aktualizováno: 2026-10-09
    Empirické benchmarky potvrzují, že 96MB 3D V-Cache zrychluje HNSW grafové vyhledávání až o 88 % a stavbu indexu o 50 % díky eliminaci pointer chasing latence do DRAM.
-   [2mÚryvek:[0m ...v DDR5), ale Prompt Processing, n-gram speculative lookup [1m[33mcache[0m a RAG retrieval běží v L3 s maximální efektivitou. 3...
+   Úryvek: ...v DDR5), ale Prompt Processing, n-gram speculative lookup cache a RAG retrieval běží v L3 s maximální efektivitou. 3...
 
- [1m[poz-vytvoření-privátní-benchmarkové-suite-zen4-3d-vcache-exploit-apa][0m [36m[POZNATEK][0m [1mVytvoření privátní benchmarkové suite zen4-3d-vcache-exploit (Apache 2.0, Zero-VRAM)[0m
-   [2mTagy: vcache,3d-cache,zen4,speculative-decoding,benchmark,apache2,0-vram | Aktualizováno: 2026-11-04[0m
+ [poz-vytvoření-privátní-benchmarkové-suite-zen4-3d-vcache-exploit-apa] [POZNATEK] Vytvořeni privátní benchmarkové suite zen4-3d-vcache-exploit (Apache 2.0, Zero-VRAM)
+   Tagy: vcache,3d-cache,zen4,speculative-decoding,benchmark,apache2,0-vram | Aktualizováno: 2026-11-04
