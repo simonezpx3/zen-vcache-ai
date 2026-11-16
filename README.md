@@ -156,3 +156,14 @@ zen-vcache-ai/
 ```
 
 </details>
+
+---
+
+## Support / Hardware Fund
+
+If these L3 3D V-Cache benchmarks, Zen 4 PMU measurements, or `llama.cpp` `_MM_HINT_NTA` patches saved you time, you can support future hardware-level research (**target: RTX 3090 24 GB & Zen 5 X3D benchmarks**):
+
+- **Ko-fi (0% platform fee):** [`ko-fi.com/simonezpx3`](https://ko-fi.com/simonezpx3)
+- **Bitcoin Lightning:** `arcicml@coinos.io` ([tip page](https://coinos.io/arcicml))
+- **Bitcoin (On-chain SegWit):** `bc1qzt3djcdudxx93vjuusph4r5v9w08uca6zqkf85`
+- **BIP-21 URI:** [`bitcoin:bc1qzt3djcdudxx93vjuusph4r5v9w08uca6zqkf85?message=Hardware%20Fund`](bitcoin:bc1qzt3djcdudxx93vjuusph4r5v9w08uca6zqkf85?message=Hardware%20Fund)
