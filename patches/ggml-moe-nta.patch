@@ -1,0 +1,118 @@
+From 74cd3639af5903f6ba7a56d8220ebdd59780b89e Mon Sep 17 00:00:00 2001
+From: simonez & Arci <322738847+simonezpx3@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 11:07:36 +0100
+Subject: [PATCH] perf(ggml-cpu): add GGML_MOE_NTA prefetch and
+ GGML_MOE_THREADS cap for mul_mat_id
+
+---
+ ggml/src/ggml-cpu/ggml-cpu.c | 53 ++++++++++++++++++++++++++++++++----
+ 1 file changed, 48 insertions(+), 5 deletions(-)
+
+diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
+index a76af8487..de4f55a34 100644
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -39,6 +39,15 @@
+ #include <syscall.h>
+ #endif
+ 
++#if defined(__SSE__)
++#include <xmmintrin.h>
++#define GGML_PREFETCH_NTA(p) _mm_prefetch((const char *)(p), _MM_HINT_NTA)
++#elif defined(__GNUC__) || defined(__clang__)
++#define GGML_PREFETCH_NTA(p) __builtin_prefetch((p), 0, 0)
++#else
++#define GGML_PREFETCH_NTA(p) ((void)(p))
++#endif
++
+ #ifdef GGML_USE_OPENMP
+ #include <omp.h>
+ #endif
+@@ -1563,6 +1572,13 @@ static void * incr_ptr_aligned(void ** p, size_t size, size_t align) {
+     return ptr;
+ }
+ 
++static inline void ggml_prefetch_row_nta(const char * row_ptr, size_t nb01) {
++    const size_t limit = nb01 < 512 ? nb01 : 512;
++    for (size_t off = 0; off < limit; off += 64) {
++        GGML_PREFETCH_NTA(row_ptr + off);
++    }
++}
++
+ static void ggml_compute_forward_mul_mat_id(
+         const struct ggml_compute_params * params,
+               struct ggml_tensor * dst) {
+@@ -1680,14 +1696,34 @@ static void ggml_compute_forward_mul_mat_id(
+         }
+     }
+ 
++    static int ggml_moe_threads_limit = -1;
++    static int ggml_moe_nta_enabled = -1;
++    int moe_limit = __atomic_load_n(&ggml_moe_threads_limit, __ATOMIC_RELAXED);
++    if (moe_limit < 0) {
++        const char * env = getenv("GGML_MOE_THREADS");
++        moe_limit = (env && env[0]) ? atoi(env) : 0;
++        __atomic_store_n(&ggml_moe_threads_limit, moe_limit, __ATOMIC_RELAXED);
++    }
++    int moe_nta = __atomic_load_n(&ggml_moe_nta_enabled, __ATOMIC_RELAXED);
++    if (moe_nta < 0) {
++        const char * env = getenv("GGML_MOE_NTA");
++        moe_nta = (env && env[0] && atoi(env) != 0) ? 1 : 0;
++        __atomic_store_n(&ggml_moe_nta_enabled, moe_nta, __ATOMIC_RELAXED);
++    }
++    const int eff_nth = (moe_limit > 0 && moe_limit < nth && ids->ne[1] == 1) ? moe_limit : nth;
++
+     // reset current_chunk
+     for (int cur_a = ith; cur_a < n_as; cur_a += nth) {
+         atomic_int * current_chunk_ctr = (atomic_int *)(atomic_current_chunk + cur_a);
+-        *current_chunk_ctr = nth;
++        *current_chunk_ctr = eff_nth;
+     }
+ 
+     ggml_barrier(params->threadpool);
+ 
++    if (ith >= eff_nth) {
++        return;
++    }
++
+     for (int cur_a = 0; cur_a < n_as; ++cur_a) {
+         const int64_t cne1 = matrix_row_counts[cur_a];
+ 
+@@ -1718,9 +1754,9 @@ static void ggml_compute_forward_mul_mat_id(
+         int64_t nchunk0 = (nr0 + chunk_size - 1) / chunk_size;
+         int64_t nchunk1 = (nr1 + chunk_size - 1) / chunk_size;
+ 
+-        if (nchunk0 * nchunk1 < nth * 4 || disable_chunking) {
+-            nchunk0 = nr0 > nr1 ? nth : 1;
+-            nchunk1 = nr0 > nr1 ? 1 : nth;
++        if (nchunk0 * nchunk1 < eff_nth * 4 || disable_chunking) {
++            nchunk0 = nr0 > nr1 ? eff_nth : 1;
++            nchunk1 = nr0 > nr1 ? 1 : eff_nth;
+         }
+ 
+         const int64_t dr0 = (nr0 + nchunk0 - 1) / nchunk0;
+@@ -1740,13 +1776,20 @@ static void ggml_compute_forward_mul_mat_id(
+             const int64_t ir1_start = dr1 * ith1;
+             const int64_t ir1_end = MIN(ir1_start + dr1, nr1);
+ 
++            if (moe_nta) {
++                ggml_prefetch_row_nta(src0_cur + ir0_start * nb01, nb01);
++                if (ir0_start + 1 < ir0_end) {
++                    ggml_prefetch_row_nta(src0_cur + (ir0_start + 1) * nb01, nb01);
++                }
++            }
++
+             ggml_compute_forward_mul_mat_id_one_chunk(
+                 dst, src0, src1, ids, cur_a,
+                 ir0_start, ir0_end, ir1_start, ir1_end,
+                 src0_cur, matrix_rows, row_size, src1_cont, wdata
+             );
+ 
+-            if (nth >= nchunk0 * nchunk1) {
++            if (eff_nth >= nchunk0 * nchunk1) {
+                 break;
+             }
+ 
+-- 
+2.56.0
+

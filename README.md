@@ -54,10 +54,13 @@ make -C kernels
 PYTHONPATH=src python3 -m unittest tests/test_topology.py tests/test_benchmark.py -v
 PYTHONPATH=src python3 -m vcache.topology
 
-# 3. Run hybrid MoE inference pinned to 6 cores (2-7) with jemalloc + hugetlb
-./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+# 3. (Optional) Apply GGML_MOE_NTA=1 patch to your llama.cpp checkout
+git -C /path/to/llama.cpp apply "$(pwd)/patches/ggml-moe-nta.patch"
 
-# 4. Reproduce the full C/Python benchmark suite (with pre-flight, Zen 4 PMU, and E2E)
+# 4. Run hybrid MoE inference pinned to 6 cores (2-7) with jemalloc + hugetlb
+GGML_MOE_NTA=1 ./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+
+# 5. Reproduce the full C/Python benchmark suite (with pre-flight, Zen 4 PMU, and E2E)
 ./reproduce.sh --perf --full
 ```
 
@@ -145,6 +148,7 @@ zen-vcache-ai/
 ├── src/vcache/        # topology, AVX-512 vector ctypes, SpecOPD trainer & GGUF exporter
 ├── kernels/           # OpenMP AVX-512 VPOPCNTDQ/INT8 & Zen 4 PMU C kernels
 ├── benchmarks/        # Standalone C/Python L3 & DDR5 microbenchmarks + preflight_check.py
+├── patches/           # ggml-moe-nta.patch (_MM_HINT_NTA prefetch for llama.cpp mul_mat_id)
 ├── examples/          # Lockless /dev/shm IPC & Zstd L2/L3 stream examples
 ├── results/           # Saved raw outputs & Zen 4 PMU stats
 ├── tests/             # Unit tests (topology, vector, specopd, benchmark)
