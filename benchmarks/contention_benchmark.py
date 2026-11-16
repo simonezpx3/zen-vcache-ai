@@ -7,16 +7,17 @@ Compares:
   2. Isolated via vcache-run policy (pinned to cores 0-3, isolating database from compute).
 """
 
-import multiprocessing as mp
-import numpy as np
 import ctypes
+import json
+import multiprocessing as mp
 import os
 import subprocess
 import sys
 import tempfile
 import time
-import json
 from pathlib import Path
+
+import numpy as np
 
 # Optional external L3VectorIndex; fall back to self-contained L3-resident index
 _kb_dir = Path.home() / ".agents/knowledge"
@@ -61,8 +62,8 @@ def stress_worker(core_id: int, stop_flag: mp.Event):
     """Generates continuous DDR5 memory bus traffic spilling past L3 cache."""
     try:
         os.sched_setaffinity(0, {core_id})
-    except Exception:
-        pass
+    except OSError as exc:
+        sys.stderr.write(f"affinity warning: {exc}\n")
 
     # Allocate 128MB buffer of 64-bit integers
     size = (STRESS_BUFFER_SIZE_MB * 1024 * 1024) // 8
@@ -93,6 +94,7 @@ def _build_nta_lib(tmp_dir: str) -> str | None:
     )
     res = subprocess.run(
         ["gcc", "-O3", "-march=native", "-shared", "-fPIC", str(c_src), "-o", str(so_out)],
+        check=False,
         capture_output=True,
     )
     return str(so_out) if res.returncode == 0 else None
@@ -102,8 +104,8 @@ def stress_worker_nta(core_id: int, stop_flag: mp.Event, so_path: str | None):
     """Generates DDR5 traffic using non-temporal stores to avoid L3 eviction."""
     try:
         os.sched_setaffinity(0, {core_id})
-    except Exception:
-        pass
+    except OSError as exc:
+        sys.stderr.write(f"affinity warning: {exc}\n")
 
     size = (STRESS_BUFFER_SIZE_MB * 1024 * 1024) // 8
     buf = np.ones(size, dtype=np.int64)
