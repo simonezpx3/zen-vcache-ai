@@ -85,7 +85,7 @@ def _build_nta_lib(tmp_dir: str) -> str | None:
         "#include <stdint.h>\n"
         "void nta_sweep(int64_t *buf, size_t n) {\n"
         "    for (size_t i = 0; i < n; i += 8) {\n"
-        "        _mm_stream_si64((long long *)&buf[i], (long long)(i + 1));\n"
+        "        _mm_stream_si64((long long *)(buf + i), (long long)(i + 1));\n"
         "    }\n"
         "    _mm_sfence();\n"
         "}\n",
@@ -235,9 +235,10 @@ def main():
     for m in ["p50_us", "p90_us", "p95_us", "p99_us", "max_us", "std_us"]:
         name = m.replace("_us", "").upper()
         if name == "STD": name = "JITTER (STD)"
+        vq, vu, vp, vn = s_quiet[m], s_unpinned[m], s_pinned[m], s_nta[m]
         print(
-            f"{name:<16} | {s_quiet[m]:>9.1f} µs   | {s_unpinned[m]:>9.1f} µs   | "
-            f"{s_pinned[m]:>11.1f} µs   | {s_nta[m]:>11.1f} µs"
+            f"{name:<16} | {vq:>9.1f} µs   | {vu:>9.1f} µs   | "
+            f"{vp:>11.1f} µs   | {vn:>11.1f} µs"
         )
     print("=" * 98)
 

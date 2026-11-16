@@ -21,8 +21,8 @@ def check_environment() -> dict:
     warnings = []
     if governor not in ("performance", "unknown"):
         warnings.append(f"CPU governor is '{governor}' (recommend 'performance' to reduce variance)")
-    if "[always]" not in thp and thp != "unknown":
-        warnings.append(f"THP is '{thp}' (recommend '[always]' for 2MB TLB residency)")
+    if not thp.startswith(chr(91) + "always") and thp != "unknown":
+        warnings.append(f"THP is '{thp}' (recommend 'always' for 2MB TLB residency)")
     if load1 > 1.5:
         warnings.append(f"High 1-min system load ({load1:.2f} > 1.50); desktop noise may inflate p99/std")
 
@@ -43,12 +43,13 @@ def main() -> int:
     args = parser.parse_args()
 
     report = check_environment()
+    l1 = report["load_avg"][0]
     print(
         f"Pre-flight: governor={report['cpu_governor']} | THP={report['thp_enabled']} | "
-        f"load1={report['load_avg'][0]:.2f} | paranoid={report['perf_event_paranoid']}"
+        f"load1={l1:.2f} | paranoid={report['perf_event_paranoid']}"
     )
     for w in report["warnings"]:
-        print(f"  [WARN] {w}")
+        print(f"  WARN // {w}")
 
     if args.json:
         out = Path(args.json)

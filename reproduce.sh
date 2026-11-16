@@ -12,7 +12,7 @@ for arg in "$@"; do
         --perf) RUN_PERF=1 ;;
         --full) RUN_FULL=1 ;;
         -h|--help)
-            echo "Usage: $0 [--perf] [--full]"
+            echo "Usage: $0 (--perf | --full)"
             exit 0
             ;;
         *)
