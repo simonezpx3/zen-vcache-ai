@@ -1,7 +1,7 @@
 ========================================================================
  64MB L3 Working Buffer: 4KB Pages vs 2MB HugePages Latency
 ========================================================================
-4KB Standard Pages :     8.83 ms
-2MB HugePages (THP):     8.88 ms
-Improvement        :    -0.5 %
+4KB Standard Pages :     8.27 ms
+2MB HugePages (THP):     8.22 ms
+Improvement        :    +0.5 %
 ========================================================================

@@ -5,11 +5,11 @@ Corpus: 8000 JSONL transcript records | Total Raw Size: 3.21 MiB (Avg: 420.9 B/r
 Trained Zstd Dictionary Size: 114688 bytes (112.0 KiB <= 512 KiB L2/L3 budget)
 
 1. Small-Record JSONL Compression Ratio & Speed (8,000 Independent Lines):
-   - Standard Zstd (No Dict):    2700.63 KiB | Ratio:  1.22x | Decomp: 0.43 GB/s
-   - Zstd + 112 KiB L3 DDict:     379.27 KiB | Ratio:  8.67x | Decomp: 2.31 GB/s (7.12x smaller!)
+   - Standard Zstd (No Dict):    2700.63 KiB | Ratio:  1.22x | Decomp: 0.42 GB/s
+   - Zstd + 112 KiB L3 DDict:     379.27 KiB | Ratio:  8.67x | Decomp: 2.32 GB/s (7.12x smaller!)
 
 2. Streaming In-L3 Decompression Throughput (Single Core Zen 4, 96MB V-Cache):
    - Zstd Framed Stream + DDict:  166.96 KiB | Ratio: 19.70x | Decomp: 6.13 GB/s
-   - LZ4 In-L3 Hot Block Stream:  265.67 KiB | Ratio: 12.38x | Decomp: 21.34 GB/s
+   - LZ4 In-L3 Hot Block Stream:  265.67 KiB | Ratio: 12.38x | Decomp: 21.78 GB/s
    - Byte-for-Byte Integrity:    PASSED (100.0% Match)
 ====================================================================

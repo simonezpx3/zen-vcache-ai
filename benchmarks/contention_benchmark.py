@@ -9,8 +9,11 @@ Compares:
 
 import multiprocessing as mp
 import numpy as np
+import ctypes
 import os
+import subprocess
 import sys
+import tempfile
 import time
 import json
 from pathlib import Path
@@ -54,6 +57,50 @@ def stress_worker(core_id: int, stop_flag: mp.Event):
         _ = buf[::stride * 4].sum()
 
 
+def _build_nta_lib(tmp_dir: str) -> str | None:
+    """Compile a minimal x86_64 _mm_stream_si64 non-temporal thrasher."""
+    c_src = Path(tmp_dir) / "nta_thrash.c"
+    so_out = Path(tmp_dir) / "libnta_thrash.so"
+    c_src.write_text(
+        "#include <immintrin.h>\n"
+        "#include <stdint.h>\n"
+        "void nta_sweep(int64_t *buf, size_t n) {\n"
+        "    for (size_t i = 0; i < n; i += 8) {\n"
+        "        _mm_stream_si64((long long *)&buf[i], (long long)(i + 1));\n"
+        "    }\n"
+        "    _mm_sfence();\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    res = subprocess.run(
+        ["gcc", "-O3", "-march=native", "-shared", "-fPIC", str(c_src), "-o", str(so_out)],
+        capture_output=True,
+    )
+    return str(so_out) if res.returncode == 0 else None
+
+
+def stress_worker_nta(core_id: int, stop_flag: mp.Event, so_path: str | None):
+    """Generates DDR5 traffic using non-temporal stores to avoid L3 eviction."""
+    try:
+        os.sched_setaffinity(0, {core_id})
+    except Exception:
+        pass
+
+    size = (STRESS_BUFFER_SIZE_MB * 1024 * 1024) // 8
+    buf = np.ones(size, dtype=np.int64)
+
+    if so_path:
+        lib = ctypes.CDLL(so_path)
+        lib.nta_sweep.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        ptr = buf.ctypes.data
+        while not stop_flag.is_set():
+            lib.nta_sweep(ptr, size)
+    else:
+        stride = 64 // 8
+        while not stop_flag.is_set():
+            buf[::stride] += 1
+
+
 def run_benchmark(idx: L3VectorIndex, affinity_cores: set[int] | None, desc: str) -> list[float]:
     if affinity_cores is not None:
         os.sched_setaffinity(0, affinity_cores)
@@ -92,8 +139,19 @@ def main():
     print("\nPhase 1 // Measuring Quiet Baseline (No Contention)...")
     quiet_latencies = run_benchmark(idx, {0, 1, 2, 3}, "Quiet System (Cores 0-3)")
 
-    # 2. Start Stress Workers on Cores 4-7
-    print(f"\nPhase 2 // Spawning {NUM_STRESS_WORKERS} Memory Thrashers on Cores 4-7 ({STRESS_BUFFER_SIZE_MB}MB each -> DDR5)...")
+    def stop_workers(workers_list, ev):
+        ev.set()
+        for p in workers_list:
+            p.join(timeout=1.0)
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=1.0)
+            if p.is_alive():
+                p.kill()
+                p.join()
+
+    # 2. Start Temporal Stress Workers on Cores 4-7
+    print(f"\nPhase 2 // Spawning {NUM_STRESS_WORKERS} Temporal Thrashers on Cores 4-7 ({STRESS_BUFFER_SIZE_MB}MB each -> DDR5)...")
     stop_event = mp.Event()
     workers = []
     for cid in range(4, 4 + NUM_STRESS_WORKERS):
@@ -113,16 +171,25 @@ def main():
         pinned_latencies = run_benchmark(idx, {0, 1, 2, 3}, "Isolated (Cores 0-3)")
 
     finally:
-        print("\nStopping background stress workers...")
-        stop_event.set()
-        for p in workers:
-            p.join(timeout=1.0)
-            if p.is_alive():
-                p.terminate()
-                p.join(timeout=1.0)
-            if p.is_alive():
-                p.kill()
-                p.join()
+        print("\nStopping temporal stress workers...")
+        stop_workers(workers, stop_event)
+
+    # Scenario C: Non-Temporal (NTA) Thrashers on Cores 4-7
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        so_path = _build_nta_lib(tmp_dir)
+        print(f"\nPhase 5 // Spawning {NUM_STRESS_WORKERS} NTA Streaming Thrashers on Cores 4-7 (lib={'OK' if so_path else 'fallback'})...")
+        stop_nta = mp.Event()
+        nta_workers = []
+        for cid in range(4, 4 + NUM_STRESS_WORKERS):
+            p = mp.Process(target=stress_worker_nta, args=(cid, stop_nta, so_path))
+            p.start()
+            nta_workers.append(p)
+        time.sleep(1.0)
+        try:
+            nta_latencies = run_benchmark(idx, {0, 1, 2, 3}, "Isolated vs NTA (Cores 0-3)")
+        finally:
+            print("Stopping NTA stress workers...")
+            stop_workers(nta_workers, stop_nta)
 
     # Calculate statistics
     def calc_stats(lats):
@@ -140,28 +207,33 @@ def main():
     s_quiet = calc_stats(quiet_latencies)
     s_unpinned = calc_stats(unpinned_latencies)
     s_pinned = calc_stats(pinned_latencies)
+    s_nta = calc_stats(nta_latencies)
 
     # Format table
-    print("\n" + "=" * 78)
-    print(f"{'Metric':<18} | {'Quiet (Cores 0-3)':<16} | {'Unpinned under Load':<20} | {'vcache-run Isolated':<18}")
-    print("-" * 78)
+    print("\n" + "=" * 98)
+    print(f"{'Metric':<16} | {'Quiet (0-3)':<14} | {'Unpinned':<14} | {'Pinned (Temp)':<16} | {'Pinned vs NTA':<16}")
+    print("-" * 98)
     for m in ["p50_us", "p90_us", "p95_us", "p99_us", "max_us", "std_us"]:
         name = m.replace("_us", "").upper()
         if name == "STD": name = "JITTER (STD)"
-        val_q = s_quiet[m]
-        val_u = s_unpinned[m]
-        val_p = s_pinned[m]
-        v_q = f"{val_q:.1f} µs"
-        v_u = f"{val_u:.1f} µs"
-        v_p = f"{val_p:.1f} µs"
-        print(f"{name:<18} | {v_q:<16} | {v_u:<20} | {v_p:<18}")
-    print("=" * 78)
+        print(
+            f"{name:<16} | {s_quiet[m]:>9.1f} µs   | {s_unpinned[m]:>9.1f} µs   | "
+            f"{s_pinned[m]:>11.1f} µs   | {s_nta[m]:>11.1f} µs"
+        )
+    print("=" * 98)
 
     p99_diff = s_unpinned["p99_us"] - s_pinned["p99_us"]
     jitter_reduction = (s_unpinned["std_us"] - s_pinned["std_us"]) / s_unpinned["std_us"] * 100.0
+    nta_p99_diff = s_pinned["p99_us"] - s_nta["p99_us"]
 
-    print(f"\nResult: vcache-run isolation reduces p99 tail latency by {p99_diff:.1f} µs")
-    print(f"Jitter reduction: {jitter_reduction:.1f}% lower standard deviation.")
+    if p99_diff >= 0:
+        print(f"\nResult (Temporal): vcache-run isolation reduces p99 tail latency by {p99_diff:.1f} µs ({jitter_reduction:.1f}% lower std).")
+    else:
+        print(
+            f"\nResult (Temporal): vcache-run isolation increases p99 by {-p99_diff:.1f} µs "
+            f"(7800X3D shares 96MB L3 across all 8 cores without PQoS/CAT; pinning alone does not block L3 eviction)."
+        )
+    print(f"Result (NTA Guard): Non-temporal thrashers change pinned p99 by {-nta_p99_diff:+.1f} µs ({s_nta['p99_us']:.1f} µs vs {s_pinned['p99_us']:.1f} µs).")
 
     # Save results to JSON
     out_file = Path(__file__).resolve().parent.parent / "results/contention_benchmark_results.json"
@@ -174,7 +246,9 @@ def main():
         "quiet": s_quiet,
         "unpinned": s_unpinned,
         "vcache_run_isolated": s_pinned,
+        "vcache_run_vs_nta": s_nta,
         "p99_improvement_us": p99_diff,
+        "nta_p99_improvement_us": nta_p99_diff,
         "jitter_reduction_pct": jitter_reduction
     }
     out_file.write_text(json.dumps(results, indent=2), encoding="utf-8")

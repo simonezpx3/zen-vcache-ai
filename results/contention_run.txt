@@ -1,27 +1,30 @@
 ======================================================================
 AMD Ryzen 7 7800X3D: 3D V-Cache Contention & Isolation Benchmark
 ======================================================================
-Index loaded: 1252 documents, 78.25 KiB L3 Hot Index.
+Index loaded: 1614 documents, 201.88 KiB L3 Hot Index.
 
 Phase 1 // Measuring Quiet Baseline (No Contention)...
 
-Phase 2 // Spawning 4 Memory Thrashers on Cores 4-7 (128MB each -> DDR5)...
+Phase 2 // Spawning 4 Temporal Thrashers on Cores 4-7 (128MB each -> DDR5)...
 Phase 3 // Running Scenario A: Unpinned / Default Scheduling (Cores 0-7)...
 Phase 4 // Running Scenario B: vcache-run Core Isolation (Cores 0-3)...
 
-Stopping background stress workers...
+Stopping temporal stress workers...
 
-==============================================================================
-Metric             | Quiet (Cores 0-3) | Unpinned under Load  | vcache-run Isolated
-------------------------------------------------------------------------------
-P50                | 590.4 µs         | 650.6 µs             | 660.1 µs          
-P90                | 625.6 µs         | 701.1 µs             | 720.9 µs          
-P95                | 630.1 µs         | 716.8 µs             | 745.5 µs          
-P99                | 633.9 µs         | 746.6 µs             | 785.3 µs          
-MAX                | 640.6 µs         | 808.6 µs             | 803.0 µs          
-JITTER (STD)       | 18.3 µs          | 37.5 µs              | 47.8 µs           
-==============================================================================
+Phase 5 // Spawning 4 NTA Streaming Thrashers on Cores 4-7 (lib=OK)...
+Stopping NTA stress workers...
 
-Result: vcache-run isolation reduces p99 tail latency by -38.7 µs
-Jitter reduction: -27.6% lower standard deviation.
+==================================================================================================
+Metric           | Quiet (0-3)    | Unpinned       | Pinned (Temp)    | Pinned vs NTA   
+--------------------------------------------------------------------------------------------------
+P50              |    2192.7 µs   |    2421.7 µs   |      2383.8 µs   |      2205.4 µs
+P90              |    2363.4 µs   |    2668.4 µs   |      2630.1 µs   |      2422.6 µs
+P95              |    2379.2 µs   |    2737.7 µs   |      2673.2 µs   |      2581.4 µs
+P99              |    2418.3 µs   |    2973.7 µs   |      2836.1 µs   |      7418.6 µs
+MAX              |    2466.1 µs   |    3523.1 µs   |      2926.6 µs   |     11685.8 µs
+JITTER (STD)     |      66.6 µs   |     159.0 µs   |       137.5 µs   |       786.6 µs
+==================================================================================================
+
+Result (Temporal): vcache-run isolation reduces p99 tail latency by 137.5 µs (13.5% lower std).
+Result (NTA Guard): Non-temporal thrashers change pinned p99 by +4582.4 µs (7418.6 µs vs 2836.1 µs).
 Detailed metrics saved to: results/contention_benchmark_results.json

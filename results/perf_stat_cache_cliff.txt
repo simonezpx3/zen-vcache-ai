@@ -1,16 +1,34 @@
+====================================================================================================
+ AMD Ryzen 7 7800X3D Cache & TLB Cliff Benchmark (Pointer Chasing, CPU Pinned, 2MB Aligned)
+ Unified 96MB L3 (3D V-Cache) vs System DDR5 | 4KB Pages (TLB-bound) vs 2MB THP (Cache-bound)
+====================================================================================================
+Size       | 4KB Latency (med±std) | 2MB THP (med±std)     | Primary Bottleneck / Zone     
+-----------+------------------------+------------------------+--------------------------------------
+   8 MB    |     12.01 ±  0.18 ns   |     10.45 ±  0.10 ns   | L3 SRAM (Fits in L2 dTLB)
+  16 MB    |     13.52 ±  0.23 ns   |     10.88 ±  0.17 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  24 MB    |     14.50 ±  0.18 ns   |     10.95 ±  0.08 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  32 MB    |     15.38 ±  0.52 ns   |     11.05 ±  0.09 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  48 MB    |     16.80 ±  0.37 ns   |     11.06 ±  0.06 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  64 MB    |     17.67 ±  0.61 ns   |     11.25 ±  0.95 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  80 MB    |     24.26 ±  1.78 ns   |     14.75 ±  2.54 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  96 MB    |     31.29 ±  1.64 ns   |     20.42 ±  0.59 ns   | Unified 96MB L3 (4KB = TLB Misses)
+ 112 MB    |     39.19 ±  1.08 ns   |     31.62 ±  1.50 ns   | DDR5 Memory Bus (L3 Spillover)
+ 128 MB    |     45.46 ±  1.25 ns   |     35.66 ±  1.43 ns   | DDR5 Memory Bus (L3 Spillover)
+ 160 MB    |     54.13 ±  1.11 ns   |     45.46 ±  1.35 ns   | DDR5 Memory Bus (L3 Spillover)
+ 256 MB    |     65.80 ±  0.80 ns   |     56.52 ±  0.53 ns   | DDR5 Memory Bus (L3 Spillover)
+====================================================================================================
 
  Performance counter stats for './benchmarks/cache_cliff':
 
-    60,538,387,438      cycles:u                                                                (83.33%)
-     1,810,729,847      instructions:u                                                          (83.34%)
-     1,076,766,759      cache-references:u                                                      (83.32%)
-       546,422,268      cache-misses:u                                                          (83.34%)
-       574,454,863      L1-dcache-load-misses:u                                                 (83.34%)
-           342,482      dTLB-load-misses:u                                                      (83.32%)
+   368,528,870,068      cycles:u                                                              
+     9,472,247,510      instructions:u                                                        
+     2,312,927,028      ls_dmnd_fills_from_sys.local_ccx:u                                      
+       697,828,326      ls_dmnd_fills_from_sys.dram_io_near:u                                      
+     1,060,696,361      dTLB-load-misses:u                                                    
 
-      12.871855021 seconds time elapsed
+      78.409145730 seconds time elapsed
 
-      12.717961000 seconds user
-       0.064566000 seconds sys
+      76.356210000 seconds user
+       1.538908000 seconds sys
 
 

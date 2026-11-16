@@ -1,0 +1,12 @@
+{
+  "cpu_governor": "performance",
+  "thp_enabled": "[always] madvise never",
+  "perf_event_paranoid": "2",
+  "load_avg": [
+    0.25,
+    0.31,
+    0.68
+  ],
+  "warnings": [],
+  "clean": true
+}

@@ -5,9 +5,9 @@
   Residency Domain      : 100% inside 64 MB 3D V-Cache Safe Zone (2MB HugePages enabled)
   ADC Lookup Table Size : 4.00 KiB (64 subspaces x 64 centroids, pinned in 32 KiB L1D)
 ----------------------------------------------------------------------------------------------------
-  Exhaustive 1M Scan [1 Core ] :  638.09 us / query |   1567.2 QPS |   1.57 B vec/s | 100.30 GB/s
-  Exhaustive 1M Scan [4 Cores] :  153.39 us / query |   6519.2 QPS |   6.52 B vec/s | 417.23 GB/s
-  Exhaustive 1M Scan [8 Cores] :  102.20 us / query |   9784.4 QPS |   9.78 B vec/s | 626.20 GB/s
+  Exhaustive 1M Scan [1 Core ] :  673.14 us / query |   1485.6 QPS |   1.49 B vec/s |  95.08 GB/s
+  Exhaustive 1M Scan [4 Cores] :  153.14 us / query |   6530.0 QPS |   6.53 B vec/s | 417.92 GB/s
+  Exhaustive 1M Scan [8 Cores] :   97.86 us / query |  10218.7 QPS |  10.22 B vec/s | 653.99 GB/s
 ----------------------------------------------------------------------------------------------------
-  IVF + PQ64 Top-4096 [1 Core] :    2.55 us / query | 392240.4 QPS | Zero DDR5 Access (sink=0)
+  IVF + PQ64 Top-4096 [1 Core] :    2.51 us / query | 398436.1 QPS | Zero DDR5 Access (sink=0)
 ====================================================================================================

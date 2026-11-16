@@ -6,15 +6,15 @@ Residency domain: Unified 96MB L3 SRAM Cache
 
 Benchmark 1 // 1-bit Hamming Search (AVX-512 VPOPCNTDQ):
   Iterations: 2000 full index scans
-  Average latency per full scan: 1.35 us (0.0013 ms)
-  Throughput: 927.63 million vector comparisons / sec
+  Average latency per full scan: 1.37 us (0.0014 ms)
+  Throughput: 909.54 million vector comparisons / sec
 
 Benchmark 2 // 512-dim INT8 Dot-Product (AVX-512 VNNI VPDPBUSD):
   Iterations: 100000 dot products
-  Average latency per 512-dim dot product: 0.3 ns (checksum: 256948)
+  Average latency per 512-dim dot product: 0.2 ns (checksum: 256948)
 
 Benchmark 3 // 512-dim Signed INT8 Dot-Product (AVX-512BW _mm512_madd_epi16):
-  Average latency per 512-dim signed dot product: 0.3 ns (checksum: 298229)
+  Average latency per 512-dim signed dot product: 0.2 ns (checksum: 298229)
 
 ====================================================================
  Verification: ALL AVX-512 SIMD KERNELS PASSED (Sub-microsecond SRAM)

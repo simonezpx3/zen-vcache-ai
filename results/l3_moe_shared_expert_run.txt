@@ -3,7 +3,7 @@
 ====================================================================================================
   MoE Execution Policy                            | Shared Expert | Cold Experts | Total Speed
 ----------------------------------------------------------------------------------------------------
-  1. Naive 8-Core MoE (8C Shared + 8C DDR5 Cold)  |    0.12 ms    |    1.14 ms   |   1.26 ms ( 791.5 tok/s)
-  2. Uniform 4-Core MoE (4C Shared + 4C DDR5 Cold) |    0.20 ms    |    1.15 ms   |   1.35 ms ( 739.8 tok/s)
-  3. Asymmetric V-Cache MoE (8C L3 + 4C NTA Cold) |    0.09 ms    |    1.07 ms   |   1.16 ms ( 864.0 tok/s)
+  1. Naive 8-Core MoE (8C Shared + 8C DDR5 Cold)  |    0.08 ms    |    1.04 ms   |   1.12 ms ( 896.0 tok/s)
+  2. Uniform 4-Core MoE (4C Shared + 4C DDR5 Cold) |    0.24 ms    |    1.00 ms   |   1.24 ms ( 806.8 tok/s)
+  3. Asymmetric V-Cache MoE (8C L3 + 4C NTA Cold) |    0.07 ms    |    1.02 ms   |   1.10 ms ( 911.0 tok/s)
 ====================================================================================================

@@ -15,7 +15,7 @@
    - L3 Tier-1 Hot Partition:   31.01 MiB (100% inside 96MB 3D V-Cache)
 
 3. Empirical ANN Search Performance (500 queries, ef=36, Top-10):
-   - Monolithic DRAM HNSW (201.4 MiB):  36928.2 QPS |  27.08 us/query | Recall@10 = 1.0000
-   - Two-Tier L3 HNSW     ( 31.0 MiB):  62733.0 QPS |  15.94 us/query | Recall@10 = 1.0000
-   - Speedup vs. Monolithic DRAM:      1.70x (+69.9% higher QPS)
+   - Monolithic DRAM HNSW (201.4 MiB):  38128.7 QPS |  26.23 us/query | Recall@10 = 1.0000
+   - Two-Tier L3 HNSW     ( 31.0 MiB):  63999.7 QPS |  15.63 us/query | Recall@10 = 1.0000
+   - Speedup vs. Monolithic DRAM:      1.68x (+67.9% higher QPS)
 ====================================================================

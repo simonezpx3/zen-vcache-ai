@@ -1,0 +1,32 @@
+--- vcache-spec-bench ---
+==============================================================================
+ ZEN 4 3D V-CACHE SPECULATIVE DRAFTING BENCHMARK
+ Model       : sha256-0c33278e8d2a1a522e1074652f15a2b2f6890d...
+ CPU Topology: AMD Ryzen 7 7800X3D 8-Core Processor
+ L3 3D Cache : True (Pinning: Cores 2-7)
+==============================================================================
+
+▶ Benchmarking scenario: refactor ... Done.
+
+▶ Benchmarking scenario: boilerplate ... Done.
+
+▶ Benchmarking scenario: greenfield ... Done.
+
+========================================================================================================
+WORKLOAD PROFILE           | BASELINE (NO SPEC) | UNPINNED 8C SMT  | L3 PINNED (4C)  | SPEEDUP  | VRAM Δ  
+========================================================================================================
+refactor                   | 0.0 tok/s          | 0.0 tok/s        | 0.0 tok/s       | 0.00x    | 0 MiB   
+boilerplate                | 0.0 tok/s          | 0.0 tok/s        | 0.0 tok/s       | 0.00x    | 0 MiB   
+greenfield                 | 0.0 tok/s          | 0.0 tok/s        | 0.0 tok/s       | 0.00x    | 0 MiB   
+========================================================================================================
+--- arci-kb L3 search ---
+
+[1m󰚩 Nalezeno 10 záznamů v databázi arci-kb:[0m
+
+ [1m[poz-využití-3d-v-cache-ryzen-7800x3d-pro-ai-88-akcelerace-hnsw-vekto][0m [36m[POZNATEK][0m [1mVyužití 3D V-Cache (Ryzen 7800X3D) pro AI: +88% akcelerace HNSW vektorového vyhledávání a RAG[0m
+   [2mTagy: 3d-vcache,ryzen-7800x3d,rag,hnsw,vector-search,qdrant,milvus,llm | Aktualizováno: 2026-10-09[0m
+   Empirické benchmarky potvrzují, že 96MB 3D V-Cache zrychluje HNSW grafové vyhledávání až o 88 % a stavbu indexu o 50 % díky eliminaci pointer chasing latence do DRAM.
+   [2mÚryvek:[0m ...v DDR5), ale Prompt Processing, n-gram speculative lookup [1m[33mcache[0m a RAG retrieval běží v L3 s maximální efektivitou. 3...
+
+ [1m[poz-vytvoření-privátní-benchmarkové-suite-zen4-3d-vcache-exploit-apa][0m [36m[POZNATEK][0m [1mVytvoření privátní benchmarkové suite zen4-3d-vcache-exploit (Apache 2.0, Zero-VRAM)[0m
+   [2mTagy: vcache,3d-cache,zen4,speculative-decoding,benchmark,apache2,0-vram | Aktualizováno: 2026-11-04[0m

@@ -4,16 +4,16 @@
 ====================================================================================================
 Size       | 4KB Latency (med±std) | 2MB THP (med±std)     | Primary Bottleneck / Zone     
 -----------+------------------------+------------------------+--------------------------------------
-   8 MB    |     12.60 ±  0.12 ns   |     10.90 ±  0.07 ns   | L3 SRAM (Fits in L2 dTLB)
-  16 MB    |     14.08 ±  0.10 ns   |     11.11 ±  0.14 ns   | Unified 96MB L3 (4KB = TLB Misses)
-  24 MB    |     15.48 ±  0.22 ns   |     11.20 ±  0.07 ns   | Unified 96MB L3 (4KB = TLB Misses)
-  32 MB    |     16.09 ±  0.30 ns   |     11.39 ±  0.14 ns   | Unified 96MB L3 (4KB = TLB Misses)
-  48 MB    |     17.33 ±  1.74 ns   |     11.62 ±  1.24 ns   | Unified 96MB L3 (4KB = TLB Misses)
-  64 MB    |     24.57 ±  1.31 ns   |     14.46 ±  2.38 ns   | Unified 96MB L3 (4KB = TLB Misses)
-  80 MB    |     30.26 ±  0.66 ns   |     18.95 ±  5.99 ns   | Unified 96MB L3 (4KB = TLB Misses)
-  96 MB    |     38.21 ±  1.45 ns   |     25.68 ±  1.61 ns   | Unified 96MB L3 (4KB = TLB Misses)
- 112 MB    |     47.43 ±  1.50 ns   |     37.18 ±  0.68 ns   | DDR5 Memory Bus (L3 Spillover)
- 128 MB    |     52.09 ±  0.77 ns   |     43.46 ±  1.95 ns   | DDR5 Memory Bus (L3 Spillover)
- 160 MB    |     60.30 ±  2.43 ns   |     51.65 ±  1.80 ns   | DDR5 Memory Bus (L3 Spillover)
- 256 MB    |     68.54 ±  0.75 ns   |     58.84 ±  0.34 ns   | DDR5 Memory Bus (L3 Spillover)
+   8 MB    |     12.48 ±  0.08 ns   |     10.84 ±  0.08 ns   | L3 SRAM (Fits in L2 dTLB)
+  16 MB    |     14.00 ±  0.03 ns   |     11.09 ±  0.12 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  24 MB    |     15.28 ±  0.08 ns   |     11.18 ±  0.04 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  32 MB    |     16.07 ±  0.18 ns   |     11.30 ±  0.37 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  48 MB    |     17.13 ±  0.58 ns   |     11.20 ±  0.96 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  64 MB    |     19.44 ±  1.25 ns   |     11.30 ±  0.92 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  80 MB    |     26.74 ±  2.08 ns   |     16.23 ±  3.13 ns   | Unified 96MB L3 (4KB = TLB Misses)
+  96 MB    |     33.75 ±  1.41 ns   |     23.59 ±  2.54 ns   | Unified 96MB L3 (4KB = TLB Misses)
+ 112 MB    |     38.51 ±  1.19 ns   |     33.27 ±  1.67 ns   | DDR5 Memory Bus (L3 Spillover)
+ 128 MB    |     45.10 ±  1.36 ns   |     35.56 ±  0.84 ns   | DDR5 Memory Bus (L3 Spillover)
+ 160 MB    |     54.73 ±  1.05 ns   |     45.86 ±  0.38 ns   | DDR5 Memory Bus (L3 Spillover)
+ 256 MB    |     66.41 ±  0.60 ns   |     56.77 ±  0.15 ns   | DDR5 Memory Bus (L3 Spillover)
 ====================================================================================================

@@ -3,10 +3,10 @@
 ====================================================================================================
   Configuration                              | Latency/Token |   Throughput  |  LUT Read BW | Ternary Ops
 ----------------------------------------------------------------------------------------------------
-  56 MiB L3-Resident (~280M 1.58b) [1 Core]  |   0.54 ms/tok |   1838.0 tok/s |  107.93 GB/s |   431.7 GOPS (checksum=24032)
-  56 MiB L3-Resident (~280M 1.58b) [4 Cores] |   0.14 ms/tok |   7406.1 tok/s |  434.89 GB/s |  1739.6 GOPS (checksum=24032)
-  56 MiB L3-Resident (~280M 1.58b) [8 Cores] |   0.09 ms/tok |  10700.4 tok/s |  628.33 GB/s |  2513.3 GOPS (checksum=24032)
+  56 MiB L3-Resident (~280M 1.58b) [1 Core]  |   0.52 ms/tok |   1940.7 tok/s |  113.96 GB/s |   455.8 GOPS (checksum=24032)
+  56 MiB L3-Resident (~280M 1.58b) [4 Cores] |   0.13 ms/tok |   7463.9 tok/s |  438.28 GB/s |  1753.1 GOPS (checksum=24032)
+  56 MiB L3-Resident (~280M 1.58b) [8 Cores] |   0.08 ms/tok |  12111.3 tok/s |  711.18 GB/s |  2844.7 GOPS (checksum=24032)
 ----------------------------------------------------------------------------------------------------
-  256 MiB DDR5-Spill (~1.2B 1.58b) [4 Cores] |   2.88 ms/tok |    347.1 tok/s |   93.18 GB/s |   372.7 GOPS (checksum=24032)
-  256 MiB DDR5-Spill (~1.2B 1.58b) [8 Cores] |   3.70 ms/tok |    270.4 tok/s |   72.58 GB/s |   290.3 GOPS (checksum=24032)
+  256 MiB DDR5-Spill (~1.2B 1.58b) [4 Cores] |   2.91 ms/tok |    343.9 tok/s |   92.32 GB/s |   369.3 GOPS (checksum=24032)
+  256 MiB DDR5-Spill (~1.2B 1.58b) [8 Cores] |   3.35 ms/tok |    298.8 tok/s |   80.20 GB/s |   320.8 GOPS (checksum=24032)
 ====================================================================================================
