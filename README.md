@@ -13,6 +13,25 @@ License        : Apache-2.0 (see LICENSE and NOTICE)
 
 ---
 
+## 00. Real-World Local AI Impact (TL;DR)
+
+If you run local AI on a **8 GB VRAM GPU + AMD Ryzen 7800X3D**, here is what actually moves the needle in daily workflows:
+
+| Real-World Workload | Configuration | Measured Result | Practical Benefit |
+| :--- | :--- | :--- | :--- |
+| **35B MoE (`Qwen3.8-35B-A3B`) on 8 GB VRAM** | `vcache-run -c 2-7` + `--moe-cache-mib 4608` + `GGML_MOE_NTA=1` | **`76.3 tok/s`** (`+25.5 %` gen, `+22.2 %` prefill) | Smooth 35B MoE while leaving cores `0-1` free for desktop |
+| **26B MoE (`Gemma 4 26B.A4B`) on 8 GB VRAM** | `6C (2-7)` + `--moe-cache-mib 3072` + `-ctk q8_0 -ctv q8_0` | **`40.5 tok/s`**, **50 % less KV VRAM** | Fits `c=8192` context with ~0 % speed loss vs FP16 KV |
+| **Code Editing & Refactoring (`Qwen3.5-9B`)** | `--spec-type ngram-map-k4v,ngram-mod` (`0 MiB` extra VRAM) | **`80.9 tok/s`** (`1.19×` bench) up to **`701.9 tok/s`** (`10.80×` warm edit) | Instant code patches with zero extra GPU memory |
+| **Local Vector RAG (1M vectors, `61 MiB`)** | 8-thread AVX-512 `VPOPCNTDQ` inside 96 MiB L3 | **`162.8 µs`** (**`6,144 QPS`**) | Sub-millisecond retrieval using `0 MiB` VRAM |
+| **Background Load Protection (`NTA` Guard)** | Non-temporal streaming (`_mm_stream_si64`) on workers | **`2,596.2 µs`** P99 (`83.5 µs` jitter vs `151.0 µs` unpinned) | Keeps L3-resident RAG & draft tables responsive under load |
+
+**3-Step Production Recipe:**
+1. **OS/Memory:** Enable `2MB THP=always` and `libjemalloc.so.2`.
+2. **Large MoE Models:** Pin inference to `6` cores (`vcache-run -c 2-7`), cache hot experts in leftover VRAM (`--moe-cache-mib`), and enable `GGML_MOE_NTA=1`.
+3. **GPU Coding Models:** Add `--spec-type ngram-map-k4v,ngram-mod` for free speculative speedup (`0 MiB` VRAM).
+
+---
+
 ## 01. Key Empirical Findings
 
 This repository consolidates our microarchitectural C/Python benchmark suite (`benchmarks/`, `results/`) and installable tooling (`bin/`, `src/vcache/`, `kernels/`) for running local AI workloads on consumer 8 GB VRAM + 96 MiB 3D V-Cache desktops.
