@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [
-    { name = "Simonez & Arci", email = "simonezpx3@gmail.com" }
+    { name = "Simonez & Arci", email = "arcicml@gmail.com" }
 ]
 keywords = ["vcache", "3d-vcache", "zen4", "speculative-decoding", "avx512", "llm"]
 classifiers = [
