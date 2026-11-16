@@ -99,7 +99,7 @@ fi
 
 if [[ "${RUN_FULL}" -eq 1 ]]; then
     echo ""
-    echo "Step 14 // Running End-to-End AI Evaluation (SpecOPD, GGML_MOE_NTA, arci-kb L3)..."
+    echo "Step 14 // Running End-to-End AI Evaluation (SpecOPD, GGML_MOE_NTA)..."
     {
         if command -v vcache-spec-bench >/dev/null 2>&1; then
             echo "--- vcache-spec-bench ---"
@@ -111,10 +111,6 @@ if [[ "${RUN_FULL}" -eq 1 ]]; then
             echo "--- llama-bench GGML_MOE_NTA=0 vs 1 ---"
             GGML_MOE_NTA=0 "${LLAMA_BENCH}" -m "${MOE_MODEL}" -t 6 -p 128 -n 32 -r 2
             GGML_MOE_NTA=1 "${LLAMA_BENCH}" -m "${MOE_MODEL}" -t 6 -p 128 -n 32 -r 2
-        fi
-        if command -v arci-kb >/dev/null 2>&1; then
-            echo "--- arci-kb L3 search ---"
-            arci-kb search "3d cache" | head -n 10
         fi
     } | tee "${RESULTS_DIR}/e2e_eval_run.txt"
 fi

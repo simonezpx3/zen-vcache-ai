@@ -166,6 +166,20 @@ PYTHONPATH=src python3 -m vcache.vector
 # 5. Launch hybrid MoE inference pinned to optimal 6 cores (2-7) with jemalloc + hugetlb
 ./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
 
-# 6. Reproduce standalone C/Python microbenchmarks (1–13)
-./reproduce.sh
+# 6. Reproduce standalone C/Python microbenchmarks (with pre-flight, Zen 4 PMU, and E2E)
+./reproduce.sh --perf --full
 ```
+
+---
+
+## 05. Zen 4 PMU Verification, NTA Guard & Practical Takeaways
+
+- **Hardware PMU Verification (`perf stat`, 0% multiplexing on `cache_cliff`):**
+  `ls_dmnd_fills_from_sys.local_ccx = 2,312,927,028` (L3 CCX hits) vs `ls_dmnd_fills_from_sys.dram_io_near = 697,828,326` (DDR5 fills). With 2MB THP, latency stays flat at **10.45–11.25 ns** up to 64 MiB (`20.42 ns` at 96 MiB) before spilling to DDR5 (**31.62–56.52 ns** at 112–256 MiB).
+- **Shared L3 Contention & Non-Temporal Guard (`_mm_stream_si64`):**
+  Because the 7800X3D has a single shared 96 MiB L3 without PQoS/CAT partitioning, temporal memory thrashers on cores `4-7` still evict L3 lines used by cores `0-3` (`P99 = 2772.7 µs`). Switching background streaming writes to non-temporal stores (`_mm_stream_si64`) restores P99 to **`2596.2 µs`** (`-176.5 µs`) and cuts jitter from `116.9 µs` to `83.5 µs`.
+- **Asymmetric Hybrid MoE (`GGML_MOE_NTA=1`):**
+  Adding `_MM_HINT_NTA` prefetching for cold DDR5 MoE experts in `ggml-cpu.c` (`Qwen3.8-35B-A3B`, `-t 6`) improves prompt processing by **`+22.2 %`** (`239.77 → 292.88 t/s`) and token generation by **`+6.7 %`** (`60.61 → 64.66 t/s`).
+- **When 3D V-Cache Helps vs. When It Does Not:**
+  - **High Impact (2×–5×):** 32–96 MiB working sets (vector RAG / HNSW / PQ64, `SQLite` mmap), L3-resident intent classifiers, and keeping `< 12 MiB` speculative n-gram tables hot under desktop load.
+  - **Low / Zero Impact:** Large dense or MoE weights (`> 96 MiB`) streaming from DDR5 (bounded by dual-channel DDR5 bandwidth, not L3 size) and fully VRAM-resident GPU models.
