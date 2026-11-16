@@ -159,6 +159,17 @@ zen-vcache-ai/
 
 ---
 
+## Acknowledgments
+
+This project builds on the work of the following open-source projects and maintainers:
+
+- **[llama.cpp](https://github.com/ggml-org/llama.cpp)** & **[ggml](https://github.com/ggml-org/ggml)** (Georgi Gerganov & contributors) — Local LLM inference engine, MoE `mul_mat_id`, and `q8_0` KV cache support.
+- **[ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp)** (Iwan Kawrakow) — Hybrid CPU/GPU MoE optimization techniques and benchmark documentation structure.
+- **[jemalloc](https://github.com/jemalloc/jemalloc)** & **[numactl](https://github.com/numactl/numactl)** — Memory allocator and CPU/NUMA pinning primitives used by `vcache-run`.
+- **[zstd](https://github.com/facebook/zstd)** & **[SQLite](https://www.sqlite.org/)** — Dictionary compression and memory-mapped database engines benchmarked in L2/L3 studies.
+
+---
+
 ## Support / Hardware Fund
 
 If these L3 3D V-Cache benchmarks, Zen 4 PMU measurements, or `llama.cpp` `_MM_HINT_NTA` patches saved you time, you can support future hardware-level research (**target: RTX 3090 24 GB & Zen 5 X3D benchmarks**):
