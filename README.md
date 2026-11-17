@@ -39,6 +39,11 @@ Measured on **AMD Ryzen 7 7800X3D (96 MiB L3, `SMT=Off`, `THP=always`) + NVIDIA 
 | **Local Vector RAG (1M vectors)** | 8-thread AVX-512 `VPOPCNTDQ` (`61 MiB` in L3) | **`162.8 µs`** (**`6,144 QPS`**, `366 GB/s`) | Sub-millisecond retrieval with zero GPU usage |
 | **Contention Isolation (`NTA`)** | `_mm_stream_si64` background thrashers vs L3 index | **`2,596.2 µs` P99** (`83.5 µs` std vs `151.0 µs` unpinned) | Prevents background tasks from spiking RAG/draft latency |
 
+### Why These Numbers Matter
+
+- **Why `76.3 tok/s` on a 35B MoE (`8 GB` VRAM) is unusual:** A `35B Q4` model is ~`20 GB`, so over `12 GB` spills into system RAM. Dual-channel DDR5-6000 typically yields ~`65–75 GB/s` under load, and naive `llama.cpp` CPU+GPU spillover usually sits around `30–50 tok/s` with desktop stutter. Keeping attention, KV cache, and hot experts in `8 GB` VRAM while streaming only the ~`3B` active parameters per token with `vcache-run -c 2-7` and `GGML_MOE_NTA=1` prevents L3 cache thrashing and keeps generation faster than reading speed.
+- **Why `162.8 µs` (`6,144 QPS`, `366 GB/s`) for 1M-vector RAG is 10–50× faster than RAM search:** Standard RAM-bound vector search (FAISS/HNSW over DDR5) takes **1–10 ms**. Packing 1M binary vectors into `61 MiB` fits the entire index inside the `96 MiB` 3D V-Cache, where 8-thread AVX-512 `VPOPCNTDQ` computes Hamming distances at `366 GB/s` L3 bandwidth with **0% GPU usage**—ideal as an instant stage-1 retriever before reranking.
+
 ### When 3D V-Cache Helps vs. When It Does Not
 
 - **Huge win (2x–5x):** Working sets between **32 MiB and 96 MiB** (HNSW/PQ64 vector RAG, `SQLite` mmap databases, small classifiers) and keeping `< 12 MiB` speculative n-gram tables hot under desktop load.
