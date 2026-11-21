@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zen-vcache-ai — Practical 3D V-Cache Acceleration for Local AI</title>
+  <meta name="description" content="Reproducible benchmarks, vcache-run CPU pinning, AVX-512 VPOPCNTDQ kernels, and llama.cpp MoE tuning (GGML_MOE_NTA=1) for AMD Ryzen X3D + 8 GB VRAM GPUs.">
+  <meta name="keywords" content="3D V-Cache, Ryzen 7800X3D, llama.cpp, MoE, GGML_MOE_NTA, AVX-512, VPOPCNTDQ, local AI, 8GB VRAM, vector search">
+  <link rel="canonical" href="https://simonezpx3.github.io/zen-vcache-ai/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="zen-vcache-ai — Practical 3D V-Cache Acceleration for Local AI">
+  <meta property="og:description" content="Push 35B MoE models to 76.3 tok/s on 8 GB VRAM, accelerate GPU code editing 1.2x–10.8x, and run 1M-vector RAG inside 96 MiB L3 in 162.8 µs.">
+  <meta property="og:url" content="https://simonezpx3.github.io/zen-vcache-ai/">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "zen-vcache-ai",
+    "description": "Practical 3D V-Cache (Ryzen X3D) acceleration, benchmarks, AVX-512 kernels, and llama.cpp MoE tuning for local AI.",
+    "codeRepository": "https://github.com/simonezpx3/zen-vcache-ai",
+    "url": "https://simonezpx3.github.io/zen-vcache-ai/",
+    "license": "https://opensource.org/licenses/Apache-2.0",
+    "programmingLanguage": ["Python", "C"],
+    "version": "2.1.0"
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --ok: #3fb950;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main { max-width: 920px; margin: 0 auto; padding: 3rem 1.25rem; }
+    h1, h2 { line-height: 1.25; }
+    h1 { font-size: clamp(1.8rem, 3.5vw, 2.5rem); margin-bottom: 0.5rem; }
+    .subtitle { color: var(--muted); font-size: 1.1rem; margin-bottom: 1.75rem; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 2.5rem; }
+    .btn {
+      display: inline-block;
+      padding: 0.65rem 1.15rem;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      color: var(--text);
+      background: var(--surface);
+    }
+    .btn-primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.95rem; }
+    th, td { text-align: left; padding: 0.65rem 0.5rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    .metric { color: var(--ok); font-weight: 700; white-space: nowrap; }
+    pre {
+      background: #090c10;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.9rem;
+    }
+    footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.9rem; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>zen-vcache-ai</h1>
+    <p class="subtitle">
+      Practical 3D V-Cache (AMD Ryzen X3D) acceleration, reproducible benchmarks, AVX-512 kernels, and <code>llama.cpp</code> MoE tuning for local AI on 8 GB VRAM GPUs.
+    </p>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/simonezpx3/zen-vcache-ai">View on GitHub</a>
+      <a class="btn" href="https://github.com/simonezpx3/zen-vcache-ai/releases/tag/v2.1.0">Release v2.1.0</a>
+      <a class="btn" href="https://github.com/simonezpx3/zen-vcache-ai#detailed-benchmarks--methodology">Full Methodology</a>
+    </div>
+
+    <section class="card">
+      <h2>Measured Results (Ryzen 7 7800X3D + RTX 3070 8 GB)</h2>
+      <table>
+        <thead>
+          <tr><th>Workload</th><th>Setup</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>35B MoE (Qwen3.8-35B-A3B)</strong></td>
+            <td><code>vcache-run -c 2-7</code> + <code>--moe-cache-mib 4608</code> + <code>GGML_MOE_NTA=1</code></td>
+            <td class="metric">76.3 tok/s (+25.5% gen)</td>
+          </tr>
+          <tr>
+            <td><strong>26B MoE (Gemma 4 26B.A4B)</strong></td>
+            <td><code>6C (2-7)</code> + <code>--moe-cache-mib 3072</code> + <code>q8_0 KV</code></td>
+            <td class="metric">40.5 tok/s, 50% less KV VRAM</td>
+          </tr>
+          <tr>
+            <td><strong>Code Editing (Qwen3.5-9B)</strong></td>
+            <td><code>--spec-type ngram-map-k4v,ngram-mod</code> (0 MiB extra VRAM)</td>
+            <td class="metric">80.9–701.9 tok/s (1.19x–10.80x)</td>
+          </tr>
+          <tr>
+            <td><strong>Local Vector RAG (1M vectors)</strong></td>
+            <td>8-thread AVX-512 <code>VPOPCNTDQ</code> (61 MiB in L3)</td>
+            <td class="metric">162.8 µs (6,144 QPS, 366 GB/s)</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Quickstart</h2>
+      <pre><code>git clone https://github.com/simonezpx3/zen-vcache-ai.git
+cd zen-vcache-ai
+make -C kernels
+GGML_MOE_NTA=1 ./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6</code></pre>
+    </section>
+
+    <footer>
+      Apache-2.0 License · <a href="https://github.com/simonezpx3/zen-vcache-ai">github.com/simonezpx3/zen-vcache-ai</a>
+    </footer>
+  </main>
+</body>
+</html>
