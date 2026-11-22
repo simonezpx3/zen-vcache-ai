@@ -149,7 +149,7 @@ Measured via `llama-bench -ngl 99 -ot "\.ffn_.*_exps\.=CPU" -p 128 -n 64 -r 3` u
 | **Baseline `DeepSeek-R1-0528-Qwen3-8B` (GPU)** | — | — | `—` / **`76.0 tok/s`** | `—` / **`76.0 tok/s`** | `—` / **`76.0 tok/s`** |
 | **Trained `d192` -> `DeepSeek-R1-8B` (`ngld=99`)** | `92.32%` | `85.42%` | **`13.10%`** / `62.8 tok/s` | `9.03%` / `55.9 tok/s` | **`4.57%`** / `48.9 tok/s` |
 
-*Note: Micro-drafts fit in L3 and run faster on CPU than GPU, but `59k–79k` rollout tokens remain below the ~45–60% acceptance breakeven needed to beat a fast GPU baseline without multi-million-token distillation or EAGLE-style hidden-state reuse.*
+*Note: Micro-drafts fit in L3 and run faster on CPU than GPU, but `59k–79k` rollout tokens remain below the ~45–60% acceptance breakeven needed to beat a fast GPU baseline without multi-million-token distillation or EAGLE-style hidden-state reuse. Top-16K `lm_head` shortlist pruning (`benchmarks/bench_shortlist_16k.py`, `results/shortlist_16k_r1_8b.json`) shrinks `d192` `lm_head` from `29.56 MiB` to `3.19 MiB` and accelerates CPU drafting `4.97×` (`142.3 -> 707.3 tok/s`) with negligible acceptance loss (`0.1105 -> 0.1087`), confirming `prefix_accept` remains the primary bottleneck.*
 
 </details>
 

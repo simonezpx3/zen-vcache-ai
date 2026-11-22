@@ -113,6 +113,14 @@ if [[ "${RUN_FULL}" -eq 1 ]]; then
             GGML_MOE_NTA=1 "${LLAMA_BENCH}" -m "${MOE_MODEL}" -t 6 -p 128 -n 32 -r 2
         fi
     } | tee "${RESULTS_DIR}/e2e_eval_run.txt"
+
+    PY_BIN="${SCRIPT_DIR}/.venv/bin/python"
+    [[ -x "${PY_BIN}" ]] || PY_BIN="python3"
+    if "${PY_BIN}" -c "import numpy" >/dev/null 2>&1 && [[ -f "${BENCHMARK_DIR}/bench_l3_rabitq_10m.py" ]]; then
+        echo ""
+        echo "Step 15 // Running Two-Tier L3-RaBitQ + INT8 VNNI 1M Smoke Benchmark..."
+        "${SCRIPT_DIR}/bin/vcache-run" --profile rag -- "${PY_BIN}" "${BENCHMARK_DIR}/bench_l3_rabitq_10m.py" --smoke-1m --json-out "${RESULTS_DIR}/l3_rabitq_10m_smoke.json"
+    fi
 fi
 
 echo "===================================================================="
