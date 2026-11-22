@@ -124,6 +124,11 @@
             <td>8-thread AVX-512 <code>VPOPCNTDQ</code> (61 MiB in L3)</td>
             <td class="metric">162.8 µs (6,144 QPS, 366 GB/s)</td>
           </tr>
+          <tr>
+            <td><strong>10M-Vector RAG (512-d)</strong></td>
+            <td>Two-tier L3 RaBitQ (36.5 MiB) + THP <code>VPDPBUSD</code> (4.84 GiB DDR5-NTA)</td>
+            <td class="metric">296.4 µs P50 / 358.0 µs P99 (3,313 QPS, 0.938 Recall@10)</td>
+          </tr>
         </tbody>
       </table>
     </section>

@@ -37,6 +37,7 @@ Measured on **AMD Ryzen 7 7800X3D (96 MiB L3, `SMT=Off`, `THP=always`) + NVIDIA 
 | **26B MoE (`Gemma 4 26B.A4B`)** | `6C (2-7)` + `--moe-cache-mib 3072` + `q8_0 KV` | **`40.5 tok/s`**, **50% less KV VRAM** | Fits `c=8192` context with ~0% speed penalty vs FP16 KV |
 | **Code Editing (`Qwen3.5-9B`)** | `--spec-type ngram-map-k4v,ngram-mod` (`0 MiB` extra VRAM) | **`80.9 tok/s`** (`1.19x` refactor) up to **`701.9 tok/s`** (`10.80x` warm) | Faster code generation and refactoring for free |
 | **Local Vector RAG (1M vectors)** | 8-thread AVX-512 `VPOPCNTDQ` (`61 MiB` in L3) | **`162.8 µs`** (**`6,144 QPS`**, `366 GB/s`) | Sub-millisecond retrieval with zero GPU usage |
+| **10M-Vector RAG (`512-d`)** | Two-tier L3 RaBitQ (`36.5 MiB`) + THP `VPDPBUSD` (`4.84 GiB` DDR5-NTA) | **`296.4 µs`** P50 / **`358.0 µs`** P99 (**`3,313 QPS`**, `0.938` Recall@10) | Scales 10× past L3 capacity with `0` GPU VRAM |
 | **Contention Isolation (`NTA`)** | `_mm_stream_si64` background thrashers vs L3 index | **`2,596.2 µs` P99** (`83.5 µs` std vs `151.0 µs` unpinned) | Prevents background tasks from spiking RAG/draft latency |
 
 ### Why These Numbers Matter
@@ -62,14 +63,16 @@ Measured on **AMD Ryzen 7 7800X3D (96 MiB L3, `SMT=Off`, `THP=always`) + NVIDIA 
 make -C kernels
 
 # 2. Run unit tests & inspect your CPU L3/AVX-512 topology
-PYTHONPATH=src python3 -m unittest tests/test_topology.py tests/test_benchmark.py -v
+PYTHONPATH=src python3 -m unittest discover -s tests -p "test_*.py" -v
 PYTHONPATH=src python3 -m vcache.topology
 
-# 3. (Optional) Apply GGML_MOE_NTA=1 patch to your llama.cpp checkout
+# 3. (Optional) Apply GGML_MOE_NTA=1 & MADV_HUGEPAGE patches to your llama.cpp checkout
 git -C /path/to/llama.cpp apply "$(pwd)/patches/ggml-moe-nta.patch"
+git -C /path/to/llama.cpp apply "$(pwd)/patches/ggml-mmap-thp.patch"
 
-# 4. Run hybrid MoE inference pinned to 6 cores (2-7) with jemalloc + hugetlb
-GGML_MOE_NTA=1 ./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+# 4. Run hybrid MoE or 10M RAG pinned to 6 cores (2-7) with jemalloc + THP
+GGML_MOE_NTA=1 ./bin/vcache-run --profile rag -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+./bin/vcache-run --profile rag -- python3 benchmarks/bench_l3_rabitq_10m.py --full-10m --json-out results/l3_rabitq_10m.json
 
 # 5. Reproduce the full C/Python benchmark suite (with pre-flight, Zen 4 PMU, and E2E)
 ./reproduce.sh --perf --full
@@ -157,9 +160,9 @@ Measured via `llama-bench -ngl 99 -ot "\.ffn_.*_exps\.=CPU" -p 128 -n 64 -r 3` u
 zen-vcache-ai/
 ├── bin/               # vcache-run, vcache-spec-bench, vcache-distill-specopd, vcache-train-specopd
 ├── src/vcache/        # topology, AVX-512 vector ctypes, SpecOPD trainer & GGUF exporter
-├── kernels/           # OpenMP AVX-512 VPOPCNTDQ/INT8 & Zen 4 PMU C kernels
-├── benchmarks/        # Standalone C/Python L3 & DDR5 microbenchmarks + preflight_check.py
-├── patches/           # ggml-moe-nta.patch (_MM_HINT_NTA prefetch for llama.cpp mul_mat_id)
+├── kernels/           # OpenMP AVX-512 VPOPCNTDQ/VPDPBUSD/INT8 & Zen 4 PMU C kernels
+├── benchmarks/        # Standalone C/Python L3, 10M RaBitQ+VNNI & DDR5 microbenchmarks
+├── patches/           # ggml-moe-nta.patch (_MM_HINT_NTA), ggml-mmap-thp.patch (MADV_HUGEPAGE)
 ├── examples/          # Lockless /dev/shm IPC & Zstd L2/L3 stream examples
 ├── results/           # Saved raw outputs & Zen 4 PMU stats
 ├── tests/             # Unit tests (topology, vector, specopd, benchmark)

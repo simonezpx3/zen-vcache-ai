@@ -1,0 +1,35 @@
+{
+  "mode": "10M",
+  "cores": "2-7",
+  "use_nta": true,
+  "num_docs": 10000000,
+  "num_centroids": 65536,
+  "top_c_stage1": 512,
+  "nprobe": 48,
+  "num_queries": 500,
+  "build_seconds": 52.91,
+  "tier0_mib": 36.5,
+  "tier1_gib": 4.843,
+  "anon_hugepages_kb": 5750784,
+  "recall_at_10": 0.938,
+  "p50_us": 296.35,
+  "p95_us": 331.78,
+  "p99_us": 358.01,
+  "qps": 3313.3,
+  "pmu": {
+    "pmu_available": true,
+    "events": {
+      "ls_dmnd_fills_from_sys.dram_io_near": 10254220,
+      "ls_sw_pf_dc_fills.dram_io_near": 6570037,
+      "l2_pf_miss_l2_l3.all": 9179462,
+      "ls_dmnd_fills_from_sys.local_ccx": 7484547,
+      "ls_sw_pf_dc_fills.local_ccx": 664217,
+      "l2_pf_miss_l2_hit_l3.all": 45079406
+    },
+    "true_core_dram_bytes": 1664238016,
+    "true_core_l3_hit_bytes": 3406602880,
+    "l3_hit_rate": 0.6718,
+    "dram_bytes_per_query": 3328476.0,
+    "l3_hit_bytes_per_query": 6813205.8
+  }
+}
