@@ -1,0 +1,30 @@
+{
+  "teacher": "DeepSeek-R1-0528-Qwen3-8B-Q4_K_M.gguf",
+  "draft": "qwen3-specopd-d192-r1_8b-q8_0.gguf",
+  "threads": 6,
+  "shortlist_size": 16384,
+  "calib_rollouts": 29,
+  "calib_tokens": 2761,
+  "eval_rollouts": 6,
+  "eval_tokens": 576,
+  "shortlist_coverage": 0.8958,
+  "lm_head_full_q8_mib": 29.56,
+  "lm_head_shortlist_q8_mib": 3.19,
+  "full_151k": {
+    "top1_acc": 0.2847,
+    "prefix_accept": 0.1105,
+    "eval_tokens": 576,
+    "draft_rollout_tokens": 552,
+    "cpu_tok_s": 142.3,
+    "elapsed_s": 7.928
+  },
+  "shortlist_16k": {
+    "top1_acc": 0.2795,
+    "prefix_accept": 0.1087,
+    "eval_tokens": 576,
+    "draft_rollout_tokens": 552,
+    "cpu_tok_s": 707.3,
+    "elapsed_s": 1.595
+  },
+  "draft_speedup": 4.97
+}

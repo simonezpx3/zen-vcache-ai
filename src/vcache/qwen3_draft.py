@@ -7,6 +7,7 @@ SwiGLU FFN, tied embeddings, and optional GPU PCA warm-start from teacher token_
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -157,6 +158,8 @@ class Qwen3MicroDraft(nn.Module):
         self.token_embd = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.blocks = nn.ModuleList([Qwen3Block(cfg) for _ in range(cfg.n_layer)])
         self.output_norm = RMSNorm(cfg.n_embd, eps=cfg.rms_norm_eps)
+        self.register_buffer("shortlist_ids", None, persistent=False)
+        self.register_buffer("shortlist_head_weight", None, persistent=False)
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -205,12 +208,47 @@ class Qwen3MicroDraft(nn.Module):
         return F.linear(hidden, self.token_embd.weight)
 
     @torch.no_grad()
+    def set_shortlist(self, shortlist_ids: torch.Tensor) -> None:
+        """Install an active Top-K token shortlist for pruned lm_head evaluation."""
+        ids = torch.unique(shortlist_ids.to(dtype=torch.long, device=self.token_embd.weight.device))
+        if ids.ndim != 1 or ids.numel() == 0:
+            raise ValueError("shortlist_ids must be a non-empty 1D tensor")
+        if int(ids.min()) < 0 or int(ids.max()) >= self.cfg.vocab_size:
+            raise ValueError("shortlist_ids out of vocabulary bounds")
+        self.shortlist_ids = ids
+        self.shortlist_head_weight = self.token_embd.weight.index_select(0, ids).detach().contiguous()
+
+    def forward_shortlist(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.shortlist_ids is None or self.shortlist_head_weight is None:
+            raise RuntimeError("Shortlist not initialized; call set_shortlist() first")
+        hidden = self.forward_hidden(input_ids)
+        return F.linear(hidden, self.shortlist_head_weight), self.shortlist_ids
+
+    def lm_head_bytes(self, shortlist: bool = False, q8: bool = True) -> int:
+        rows = int(self.shortlist_ids.numel()) if (shortlist and self.shortlist_ids is not None) else self.cfg.vocab_size
+        elems = rows * self.cfg.n_embd
+        return (elems // 32) * 34 if q8 else elems * 4
+
+    @torch.no_grad()
     def generate_draft(self, prefix_ids: torch.Tensor, max_new: int = 8) -> torch.Tensor:
         """Greedy autoregressive rollout for SpecOPD on-policy branch evaluation."""
         seq = prefix_ids
         for _ in range(max_new):
             logits = self.forward(seq)[:, -1, :]
             next_id = logits.argmax(dim=-1, keepdim=True)
+            seq = torch.cat([seq, next_id], dim=1)
+        return seq
+
+    @torch.no_grad()
+    def generate_draft_shortlist(self, prefix_ids: torch.Tensor, max_new: int = 8) -> torch.Tensor:
+        """Greedy autoregressive rollout using the pruned Top-K shortlist lm_head."""
+        if self.shortlist_ids is None or self.shortlist_head_weight is None:
+            raise RuntimeError("Shortlist not initialized; call set_shortlist() first")
+        seq = prefix_ids
+        for _ in range(max_new):
+            logits, ids = self.forward_shortlist(seq)
+            local_idx = logits[:, -1, :].argmax(dim=-1)
+            next_id = ids[local_idx].unsqueeze(-1)
             seq = torch.cat([seq, next_id], dim=1)
         return seq
 
@@ -301,3 +339,117 @@ def export_to_gguf_q8(model: Qwen3MicroDraft, teacher_gguf: Path, output_path: P
     writer.write_tensors_to_file()
     writer.close()
     return output_path
+
+
+def load_from_gguf_q8(gguf_path: Path, device: str | torch.device = "cpu") -> Qwen3MicroDraft:
+    """Load a Qwen3MicroDraft model exported by export_to_gguf_q8() into PyTorch."""
+    reader = gguf.GGUFReader(str(gguf_path), "r")
+
+    def kv_int(key: str, default: int) -> int:
+        f = reader.get_field(key)
+        return int(f.contents()) if f is not None else default
+
+    def kv_float(key: str, default: float) -> float:
+        f = reader.get_field(key)
+        return float(f.contents()) if f is not None else default
+
+    tensors = {t.name: t for t in reader.tensors}
+    embd_arr = gguf.quants.dequantize(tensors["token_embd.weight"].data, tensors["token_embd.weight"].tensor_type)
+    vocab_size, n_embd = embd_arr.shape
+    ffn_arr = gguf.quants.dequantize(tensors["blk.0.ffn_gate.weight"].data, tensors["blk.0.ffn_gate.weight"].tensor_type)
+    n_ff = int(ffn_arr.shape[0])
+
+    name_f = reader.get_field("general.name")
+    name = bytes(name_f.parts[-1]).decode("utf-8", errors="replace") if name_f is not None else gguf_path.stem
+
+    cfg = Qwen3DraftConfig(
+        name=name,
+        vocab_size=int(vocab_size),
+        n_layer=kv_int("qwen3.block_count", 4),
+        n_embd=int(n_embd),
+        n_ff=n_ff,
+        n_head=kv_int("qwen3.attention.head_count", 4),
+        n_head_kv=kv_int("qwen3.attention.head_count_kv", 2),
+        head_dim=kv_int("qwen3.attention.key_length", 64),
+        context_length=kv_int("qwen3.context_length", 4096),
+        rope_theta=kv_float("qwen3.rope.freq_base", 1_000_000.0),
+        rms_norm_eps=kv_float("qwen3.attention.layer_norm_rms_epsilon", 1e-6),
+    )
+    model = Qwen3MicroDraft(cfg).to(device)
+
+    def load_tensor(dst: torch.Tensor, tname: str) -> None:
+        t = tensors[tname]
+        arr = gguf.quants.dequantize(t.data, t.tensor_type)
+        with torch.no_grad():
+            dst.copy_(torch.from_numpy(np.array(arr, dtype=np.float32, copy=True)).to(device=dst.device, dtype=dst.dtype))
+
+    with torch.no_grad():
+        load_tensor(model.token_embd.weight, "token_embd.weight")
+        load_tensor(model.output_norm.weight, "output_norm.weight")
+        for i, blk in enumerate(model.blocks):
+            load_tensor(blk.attn_norm.weight, f"blk.{i}.attn_norm.weight")
+            load_tensor(blk.ffn_norm.weight, f"blk.{i}.ffn_norm.weight")
+            load_tensor(blk.attn.q_norm.weight, f"blk.{i}.attn_q_norm.weight")
+            load_tensor(blk.attn.k_norm.weight, f"blk.{i}.attn_k_norm.weight")
+            load_tensor(blk.attn.q_proj.weight, f"blk.{i}.attn_q.weight")
+            load_tensor(blk.attn.k_proj.weight, f"blk.{i}.attn_k.weight")
+            load_tensor(blk.attn.v_proj.weight, f"blk.{i}.attn_v.weight")
+            load_tensor(blk.attn.o_proj.weight, f"blk.{i}.attn_output.weight")
+            load_tensor(blk.ffn_gate.weight, f"blk.{i}.ffn_gate.weight")
+            load_tensor(blk.ffn_up.weight, f"blk.{i}.ffn_up.weight")
+            load_tensor(blk.ffn_down.weight, f"blk.{i}.ffn_down.weight")
+    model.eval()
+    return model
+
+
+def build_shortlist_ids(
+    teacher_gguf: Path | None = None,
+    token_sequences: list[list[int]] | None = None,
+    shortlist_size: int = 16_384,
+    vocab_size: int = 151_936,
+) -> torch.Tensor:
+    """Select Top-K active vocabulary IDs preserving special/byte tokens + corpus frequency."""
+    pinned: list[int] = []
+    seen: set[int] = set()
+
+    def _add(tid: int) -> None:
+        if 0 <= tid < vocab_size and tid not in seen:
+            seen.add(tid)
+            pinned.append(tid)
+
+    if teacher_gguf is not None and teacher_gguf.is_file():
+        reader = gguf.GGUFReader(str(teacher_gguf), "r")
+        tok_field = reader.get_field("tokenizer.ggml.tokens")
+        if tok_field is not None:
+            vocab_size = len(tok_field.data)
+            for key in ("bos_token_id", "eos_token_id", "padding_token_id", "unknown_token_id", "eot_token_id"):
+                sf = reader.get_field(f"tokenizer.ggml.{key}")
+                if sf is not None:
+                    _add(int(sf.contents()))
+            tt_field = reader.get_field("tokenizer.ggml.token_type")
+            if tt_field is not None:
+                ttypes = [int(t) for t in tt_field.contents()]
+                for tid, ttype in enumerate(ttypes):
+                    if ttype in (3, 4, 6):  # CONTROL / USER_DEFINED / BYTE
+                        _add(tid)
+            for tid in range(min(256, vocab_size)):
+                _add(tid)
+
+    counts: Counter[int] = Counter()
+    if token_sequences:
+        for seq in token_sequences:
+            counts.update(seq)
+
+    for tid, _freq in counts.most_common():
+        if len(pinned) >= shortlist_size:
+            break
+        _add(int(tid))
+
+    if len(pinned) < shortlist_size:
+        for tid in range(vocab_size):
+            if len(pinned) >= shortlist_size:
+                break
+            _add(tid)
+
+    selected = sorted(pinned[:shortlist_size])
+    return torch.tensor(selected, dtype=torch.long)
