@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>zen-vcache-ai — Practical 3D V-Cache Acceleration for Local AI</title>
-  <meta name="description" content="Reproducible benchmarks, vcache-run CPU pinning, AVX-512 VPOPCNTDQ kernels, and llama.cpp MoE tuning (GGML_MOE_NTA=1) for AMD Ryzen X3D + 8 GB VRAM GPUs.">
-  <meta name="keywords" content="3D V-Cache, Ryzen 7800X3D, llama.cpp, MoE, GGML_MOE_NTA, AVX-512, VPOPCNTDQ, local AI, 8GB VRAM, vector search">
+  <meta name="description" content="Reproducible benchmarks, vcache-run CPU pinning + THP, AVX-512 VPOPCNTDQ/VPDPBUSD kernels, and llama.cpp MoE tuning (GGML_MOE_NTA=1) for AMD Ryzen X3D + 8 GB VRAM GPUs.">
+  <meta name="keywords" content="3D V-Cache, Ryzen 7800X3D, llama.cpp, MoE, GGML_MOE_NTA, AVX-512, VPOPCNTDQ, VPDPBUSD, RaBitQ, local AI, 8GB VRAM, vector search">
   <link rel="canonical" href="https://simonezpx3.github.io/zen-vcache-ai/">
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="zen-vcache-ai — Practical 3D V-Cache Acceleration for Local AI">
-  <meta property="og:description" content="Push 35B MoE models to 76.3 tok/s on 8 GB VRAM, accelerate GPU code editing 1.2x–10.8x, and run 1M-vector RAG inside 96 MiB L3 in 162.8 µs.">
+  <meta property="og:description" content="Push 35B MoE models to 76.3 tok/s on 8 GB VRAM, accelerate GPU code editing 1.2x–10.8x, run 1M-vector RAG in 162.8 µs, and scale 10M-vector RAG to 296.4 µs.">
   <meta property="og:url" content="https://simonezpx3.github.io/zen-vcache-ai/">
 
   <script type="application/ld+json">
@@ -138,7 +138,8 @@
       <pre><code>git clone https://github.com/simonezpx3/zen-vcache-ai.git
 cd zen-vcache-ai
 make -C kernels
-GGML_MOE_NTA=1 ./bin/vcache-run -c 2-7 -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6</code></pre>
+GGML_MOE_NTA=1 ./bin/vcache-run --profile rag -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+./bin/vcache-run --profile rag -- python3 benchmarks/bench_l3_rabitq_10m.py --full-10m --json-out results/l3_rabitq_10m.json</code></pre>
     </section>
 
     <footer>

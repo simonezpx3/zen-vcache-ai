@@ -6,7 +6,7 @@
 
 ## TL;DR
 
-If you run local LLMs on an **8 GB VRAM GPU** paired with an **AMD Ryzen X3D CPU (96 MiB L3)**, large models spill into system RAM and feel sluggish. **zen-vcache-ai** is a collection of reproducible benchmarks, CPU/memory wrappers (`vcache-run`), AVX-512 kernels, and `llama.cpp` tuning recipes that push **35B MoE models to 76.3 tok/s**, accelerate **GPU code editing by 1.2x–10.8x** with zero extra VRAM, and run **1M-vector RAG inside L3 in 163 µs**.
+If you run local LLMs on an **8 GB VRAM GPU** paired with an **AMD Ryzen X3D CPU (96 MiB L3)**, large models spill into system RAM and feel sluggish. **zen-vcache-ai** is a collection of reproducible benchmarks, CPU/memory wrappers (`vcache-run`), AVX-512 kernels, and `llama.cpp` tuning recipes that push **35B MoE models to 76.3 tok/s**, accelerate **GPU code editing by 1.2x–10.8x** with zero extra VRAM, run **1M-vector RAG inside L3 in 163 µs**, and scale **10M-vector RAG (`512-d`) to 296 µs** (`3,313 QPS`) via two-tier L3 RaBitQ + THP `VPDPBUSD`.
 
 > [!IMPORTANT]
 > **Do not throw all 8 cores at DDR5-spilling MoE experts.** On a single-CCD 7800X3D, dual-channel DDR5-6000 saturates before 8 cores. Pinning inference to **6 cores (`2-7`)** via `vcache-run` leaves cores `0-1` for your desktop/OS and beats 8-core runs in both throughput (`+6.2%` to `+9.3%` over 4C) and tail jitter.
@@ -159,7 +159,7 @@ Measured via `llama-bench -ngl 99 -ot "\.ffn_.*_exps\.=CPU" -p 128 -n 64 -r 3` u
 ```text
 zen-vcache-ai/
 ├── bin/               # vcache-run, vcache-spec-bench, vcache-distill-specopd, vcache-train-specopd
-├── src/vcache/        # topology, AVX-512 vector ctypes, SpecOPD trainer & GGUF exporter
+├── src/vcache/        # topology, AVX-512 vector ctypes, SpecOPD & Qwen3 draft loader, GGUF exporter
 ├── kernels/           # OpenMP AVX-512 VPOPCNTDQ/VPDPBUSD/INT8 & Zen 4 PMU C kernels
 ├── benchmarks/        # Standalone C/Python L3, 10M RaBitQ+VNNI & DDR5 microbenchmarks
 ├── patches/           # ggml-moe-nta.patch (_MM_HINT_NTA), ggml-mmap-thp.patch (MADV_HUGEPAGE)
