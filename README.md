@@ -179,6 +179,7 @@ This project builds on the work of the following open-source projects and mainta
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** & **[ggml](https://github.com/ggml-org/ggml)** (Georgi Gerganov & contributors) — Local LLM inference engine, MoE `mul_mat_id`, and `q8_0` KV cache support.
 - **[ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp)** (Iwan Kawrakow) — Hybrid CPU/GPU MoE optimization techniques and benchmark documentation structure.
+- **[Qwen](https://github.com/QwenLM)** (Alibaba Cloud) & **[DeepSeek](https://github.com/deepseek-ai)** — Open-weight MoE and reasoning models (`Qwen3` / `Qwen3.5` / `Qwen3.8`, `DeepSeek-R1`) evaluated in throughput and SpecOPD distillation benchmarks.
 - **[jemalloc](https://github.com/jemalloc/jemalloc)** & **[numactl](https://github.com/numactl/numactl)** — Memory allocator and CPU/NUMA pinning primitives used by `vcache-run`.
 - **[zstd](https://github.com/facebook/zstd)** & **[SQLite](https://www.sqlite.org/)** — Dictionary compression and memory-mapped database engines benchmarked in L2/L3 studies.
 
