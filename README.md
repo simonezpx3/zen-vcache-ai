@@ -53,7 +53,7 @@ Measured on **AMD Ryzen 7 7800X3D (96 MiB L3, `SMT=Off`, `THP=always`) + NVIDIA 
 ### Single-CCD vs. Dual-CCD X3D & Non-X3D CPUs
 
 - **Single-CCD X3D (`7800X3D`, `9800X3D`):** All 8 cores share the single `96 MiB` L3. Pinning inference to `6` cores (`vcache-run -c 2-7`) reserves cores `0-1` for the desktop/compositor while still saturating dual-channel DDR5, and `GGML_MOE_NTA=1` keeps cold MoE streaming from polluting L3.
-- **Dual-CCD X3D (`7900X3D`, `7950X3D`, `9950X3D`):** Only **CCD0** has the `96 MiB` 3D V-Cache (CCD1 has `32 MiB` L3). Pinning inference strictly to CCD0 (`vcache-run -c 2-7` or `0-7` while leaving OS/background tasks on CCD1) avoids cross-CCD Infinity Fabric penalties and provides **even cleaner L3 isolation** than single-CCD chips. Do not span cold MoE spillover across both CCDs—desktop Ryzen still shares a single dual-channel DDR5 controller.
+- **Dual-CCD X3D (`7900X3D`, `7950X3D`, `9900X3D`, `9950X3D` — untested on hardware):** Only **CCD0** has the `96 MiB` 3D V-Cache (CCD1 has `32 MiB` L3). Pinning inference strictly to CCD0 (`vcache-run -c 0-5` on 6-core CCD0 chips like `7900X3D`/`9900X3D`, or `-c 0-7` / `-c 2-7` on 8-core CCD0 chips like `7950X3D`/`9950X3D`, while leaving OS/background tasks on CCD1) avoids cross-CCD Infinity Fabric penalties. Do not span cold MoE spillover across both CCDs—desktop Ryzen still shares a single dual-channel DDR5 controller.
 - **Non-X3D CPUs (`32 MiB` L3):** A `61 MiB` 1M-vector index will not fit in L3 and falls back to DDR5 speeds, though `GGML_MOE_NTA=1` and channel-aware thread pinning still help prevent L3 thrashing and DDR5 saturation.
 
 ## Quickstart
