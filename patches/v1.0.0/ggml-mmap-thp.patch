@@ -1,0 +1,17 @@
+diff --git i/src/llama-mmap.cpp w/src/llama-mmap.cpp
+index 9688a7e..f5b7fd6 100644
+--- i/src/llama-mmap.cpp
++++ w/src/llama-mmap.cpp
+@@ -726,6 +726,12 @@ struct llama_mmap::impl {
+         if (addr == MAP_FAILED) {
+             throw std::runtime_error(format("mmap failed: %s", strerror(errno)));
+         }
++#if defined(__linux__) && defined(MADV_HUGEPAGE)
++        if (madvise(addr, file->size(), MADV_HUGEPAGE) && errno != EINVAL) {
++            LLAMA_LOG_WARN("warning: madvise(.., MADV_HUGEPAGE) failed: %s\n",
++                    strerror(errno));
++        }
++#endif
+ 
+         // page-aligned madvise over [beg, end), clamped to the file
+         auto advise = [&](size_t beg, size_t end, int advice, const char * name) {

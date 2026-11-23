@@ -6,7 +6,7 @@
 
 ## TL;DR
 
-If you run local LLMs on an **8 GB VRAM GPU** paired with an **AMD Ryzen X3D CPU (96 MiB L3)**, large models spill into system RAM and feel sluggish. **zen-vcache-ai** is a collection of reproducible benchmarks, CPU/memory wrappers (`vcache-run`), AVX-512 kernels, and `llama.cpp` tuning recipes that push **35B MoE models to 76.3 tok/s**, accelerate **GPU code editing by 1.2x–10.8x** with zero extra VRAM, run **1M-vector RAG inside L3 in 163 µs**, and scale **10M-vector RAG (`512-d`) to 296 µs** (`3,313 QPS`) via two-tier L3 RaBitQ + THP `VPDPBUSD`.
+If you run local LLMs on an **8 GB VRAM GPU** paired with an **AMD Ryzen X3D CPU (96 MiB L3)**, large models spill into system RAM and feel sluggish. **zen-vcache-ai** is a collection of reproducible benchmarks, CPU/memory wrappers (`vcache-run`), AVX-512 kernels, and `llama.cpp` tuning recipes that push **35B MoE models to 89.5 tok/s** (`--moe-cache-cpu-share 0.8`), accelerate **GPU code editing by 1.2x–10.8x** with zero extra VRAM, run **1M-vector RAG inside L3 in 163 µs**, and scale **10M-vector RAG (`512-d`) to 296 µs** (`3,313 QPS`) via two-tier L3 RaBitQ + THP `VPDPBUSD`.
 
 > [!IMPORTANT]
 > **Do not throw all 8 cores at DDR5-spilling MoE experts.** On a single-CCD 7800X3D, dual-channel DDR5-6000 saturates before 8 cores. Pinning inference to **6 cores (`2-7`)** via `vcache-run` leaves cores `0-1` for your desktop/OS and beats 8-core runs in both throughput (`+6.2%` to `+9.3%` over 4C) and tail jitter.
@@ -33,7 +33,7 @@ Measured on **AMD Ryzen 7 7800X3D (96 MiB L3, `SMT=Off`, `THP=always`) + NVIDIA 
 
 | Workload | Setup | Result | What It Means in Practice |
 | :--- | :--- | :--- | :--- |
-| **35B MoE (`Qwen3.8-35B-A3B`)** | `vcache-run -c 2-7` + `--moe-cache-mib 4608` + `GGML_MOE_NTA=1` | **`76.3 tok/s`** (`+25.5%` gen, `+22.2%` pp128) | Smooth 35B MoE on 8 GB VRAM while desktop stays responsive |
+| **35B MoE (`Qwen3.8-35B-A3B`)** | `vcache-run -c 2-7` + `--moe-cache-mib 4096` + `--moe-cache-cpu-share 0.8` | **`89.5 tok/s`** (`+17.3%` vs `share=0.0`, `679.5 tok/s` `pp713`) | Smooth 35B MoE on 8 GB VRAM while desktop stays responsive |
 | **26B MoE (`Gemma 4 26B.A4B`)** | `6C (2-7)` + `--moe-cache-mib 3072` + `q8_0 KV` | **`40.5 tok/s`**, **50% less KV VRAM** | Fits `c=8192` context with ~0% speed penalty vs FP16 KV |
 | **Code Editing (`Qwen3.5-9B`)** | `--spec-type ngram-map-k4v,ngram-mod` (`0 MiB` extra VRAM) | **`80.9 tok/s`** (`1.19x` refactor) up to **`701.9 tok/s`** (`10.80x` warm) | Faster code generation and refactoring for free |
 | **Local Vector RAG (1M vectors)** | 8-thread AVX-512 `VPOPCNTDQ` (`61 MiB` in L3) | **`162.8 µs`** (**`6,144 QPS`**, `366 GB/s`) | Sub-millisecond retrieval with zero GPU usage |
@@ -42,7 +42,7 @@ Measured on **AMD Ryzen 7 7800X3D (96 MiB L3, `SMT=Off`, `THP=always`) + NVIDIA 
 
 ### Why These Numbers Matter
 
-- **Why `76.3 tok/s` on a 35B MoE (`8 GB` VRAM) is unusual:** A `35B Q4` model is ~`20 GB`, so over `12 GB` spills into system RAM. Dual-channel DDR5-6000 typically yields ~`65–75 GB/s` under load, and naive `llama.cpp` CPU+GPU spillover usually sits around `30–50 tok/s` with desktop stutter. Keeping attention, KV cache, and hot experts in `8 GB` VRAM while streaming only the ~`3B` active parameters per token with `vcache-run -c 2-7` and `GGML_MOE_NTA=1` prevents L3 cache thrashing and keeps generation faster than reading speed.
+- **Why `89.5 tok/s` on a 35B MoE (`8 GB` VRAM) is unusual:** A `35B Q4` model is ~`20 GB`, so over `12 GB` spills into system RAM. Dual-channel DDR5-6000 typically yields ~`65–75 GB/s` under load, and naive `llama.cpp` CPU+GPU spillover usually sits around `30–50 tok/s` with desktop stutter. Keeping attention, KV cache, and hot experts in `8 GB` VRAM (`--moe-cache-mib 4096`) while computing 80% of cold cache misses directly on the 3D V-Cache CPU (`--moe-cache-cpu-share 0.8` + `vcache-run -c 2-7` + `GGML_MOE_NTA=1`) avoids PCIe DMA stalls and L3 thrashing.
 - **Why `162.8 µs` (`6,144 QPS`, `366 GB/s`) for 1M-vector RAG is 10–50× faster than RAM search:** Standard RAM-bound vector search (FAISS/HNSW over DDR5) takes **1–10 ms**. Packing 1M binary vectors into `61 MiB` fits the entire index inside the `96 MiB` 3D V-Cache, where 8-thread AVX-512 `VPOPCNTDQ` computes Hamming distances at `366 GB/s` L3 bandwidth with **0% GPU usage**—ideal as an instant stage-1 retriever before reranking.
 
 ### When 3D V-Cache Helps vs. When It Does Not
@@ -67,11 +67,12 @@ PYTHONPATH=src python3 -m unittest discover -s tests -p "test_*.py" -v
 PYTHONPATH=src python3 -m vcache.topology
 
 # 3. (Optional) Apply GGML_MOE_NTA=1 & MADV_HUGEPAGE patches to your llama.cpp checkout
-git -C /path/to/llama.cpp apply "$(pwd)/patches/ggml-moe-nta.patch"
-git -C /path/to/llama.cpp apply "$(pwd)/patches/ggml-mmap-thp.patch"
+#    Use patches/v1.0.0/ for upstream llama.cpp >= v1.0.0
+git -C /path/to/llama.cpp apply "$(pwd)/patches/v1.0.0/ggml-moe-nta.patch"
+git -C /path/to/llama.cpp apply "$(pwd)/patches/v1.0.0/ggml-mmap-thp.patch"
 
 # 4. Run hybrid MoE or 10M RAG pinned to 6 cores (2-7) with jemalloc + THP
-GGML_MOE_NTA=1 ./bin/vcache-run --profile rag -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 -t 6
+GGML_MOE_NTA=1 ./bin/vcache-run --profile rag -- llama-server -m model.gguf -ngl 99 -cmoe --moe-cache-mib 4096 --moe-cache-cpu-share 0.8 -t 6
 ./bin/vcache-run --profile rag -- python3 benchmarks/bench_l3_rabitq_10m.py --full-10m --json-out results/l3_rabitq_10m.json
 
 # 5. Reproduce the full C/Python benchmark suite (with pre-flight, Zen 4 PMU, and E2E)
@@ -96,6 +97,15 @@ Measured via `llama-bench -ngl 99 -ot "\.ffn_.*_exps\.=CPU" -p 128 -n 64 -r 3` u
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Gemma 4 26B.A4B** (`c=8192, q8_0`) | `35.5 t/s` | `31.4 t/s` | **`40.1 t/s`** (+13.0%) | OOM | OOM |
 | **Qwen 3.8 35B.A3B** (`c=4096`) | `60.8 t/s` | `55.5 t/s` | `63.1 t/s` | **`72.4 t/s`** (+19.1%) | **`76.3 t/s`** (+25.5%) |
+
+**`llama.cpp v1.0.0` CPU Miss-Share Sweep (`--moe-cache-mib 4096`, `c=4096`, `pp713`, `tg128`, `r=3`):**
+
+| `--moe-cache-cpu-share` | `pp713` (`tok/s`) | `tg128` (`tok/s`) | Delta (`tg128` vs `0.0`) |
+| :---: | :---: | :---: | :---: |
+| `0.0` (all misses via PCIe) | `647.61 ± 3.56` | `76.24 ± 0.41` | baseline |
+| `0.5` | `665.23 ± 0.69` | `83.11 ± 0.53` | `+9.0%` |
+| **`0.8` (optimal)** | `679.48 ± 5.03` | **`89.45 ± 3.03`** | **`+17.3%`** |
+| `1.0` (no GPU LRU refresh) | **`682.75 ± 2.70`** | `79.15 ± 0.80` | `+3.8%` |
 
 **Long-Context (`pp4096`) KV Cache Quantization (`Gemma 4 26B.A4B`, `6C`):**
 
