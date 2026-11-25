@@ -18,13 +18,15 @@ If you run local LLMs on an **8 GB VRAM GPU** paired with an **AMD Ryzen X3D CPU
 
 ```mermaid
 flowchart LR
-    GPU["8 GB GPU VRAM\nAttention + KV (q8_0)\nHot MoE Experts"]
-    L3["96 MiB 3D V-Cache (11 ns)\nSpeculative N-Gram Table (<12 MiB)\nVector RAG Index (<=61 MiB)"]
-    DDR5["Dual-Channel DDR5-6000\nCold MoE Experts (6 Cores 2-7)\nNon-Temporal Prefetch (NTA)"]
+    GPU["8 GB GPU VRAM<br/>Attention + KV (q8_0)<br/>Hot MoE Experts"]
+    CPU["Ryzen 7 7800X3D (Cores 2-7)<br/>AVX-512 / MoE Compute"]
+    L3["96 MiB 3D V-Cache (11 ns)<br/>Speculative N-Gram Table (&lt;12 MiB)<br/>Vector RAG Index (&lt;=61 MiB)"]
+    DDR5["Dual-Channel DDR5-6000<br/>Cold MoE Experts<br/>Non-Temporal Prefetch (NTA)"]
 
     GPU <-->|"PCIe 4.0 x16"| DDR5
-    L3 <-->|"Zero-VRAM Drafting"| GPU
-    DDR5 -->|"GGML_MOE_NTA=1 (Bypasses L3)"| L3
+    GPU <-->|"Zero-VRAM Drafting"| CPU
+    CPU <-->|"11 ns Hot Cache"| L3
+    DDR5 -.->|"GGML_MOE_NTA=1 (Bypasses L3)"| CPU
 ```
 
 ## Real-World Results
